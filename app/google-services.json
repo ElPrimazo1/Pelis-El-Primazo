@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "106047861931",
+    "project_id": "pelis-el-primazo",
+    "storage_bucket": "pelis-el-primazo.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:106047861931:android:2985f91dd4b1add6b7b3ee",
+        "android_client_info": {
+          "package_name": "com.example.peliselprimazo"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA7tgByvoDov67n0igharEeuJLX-9_ta2k"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
