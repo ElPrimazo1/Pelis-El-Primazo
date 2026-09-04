@@ -1,11 +1,14 @@
 package com.example.peliselprimazo.ui.screens.home
 
+import android.app.Activity
+import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -29,6 +32,7 @@ import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -36,6 +40,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -46,12 +51,12 @@ import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import coil.request.CachePolicy
 import coil.request.ImageRequest
-import com.example.peliselprimazo.data.remote.MyBidSpot
+import com.example.peliselprimazo.R
 import com.example.peliselprimazo.domain.model.Movie
 import com.example.peliselprimazo.domain.model.User
 import com.example.peliselprimazo.ui.components.AuthDialog
-import com.example.peliselprimazo.ui.components.MyBidBanner
 import com.example.peliselprimazo.ui.components.ParticleLoading
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -62,7 +67,9 @@ fun HomeScreen(
     onMovieClick: (Int) -> Unit,
     onDirectPlayClick: (Movie, String) -> Unit
 ) {
+    val context = LocalContext.current
     val isLoading by viewModel.isLoading.collectAsState()
+    val isLoadingAuth by viewModel.isLoadingAuth.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
     val isPreloading by viewModel.isPreloading.collectAsState()
     val error by viewModel.error.collectAsState()
@@ -86,11 +93,14 @@ fun HomeScreen(
     val watchLaterContent by viewModel.watchLaterContent.collectAsState()
     val finishedContent by viewModel.finishedContent.collectAsState()
     val totalHours by viewModel.totalHours.collectAsState()
-    val adsSpots by viewModel.adsSpots.collectAsState()
+    
+    val updateConfig by viewModel.updateConfig.collectAsState()
 
     val coroutineScope = rememberCoroutineScope()
     var showAuthDialog by remember { mutableStateOf(false) }
     var pendingMovieToPlay by remember { mutableStateOf<Movie?>(null) }
+    
+    var showUpdateDialog by rememberSaveable { mutableStateOf(true) }
 
     val categories = listOf(
         "all" to "Inicio",
@@ -101,11 +111,15 @@ fun HomeScreen(
 
     val pagerState = rememberPagerState(initialPage = 0) { categories.size }
 
+    val playContent = { movie: Movie ->
+        viewModel.prepareAndPlay(movie) { url ->
+            onDirectPlayClick(movie, url)
+        }
+    }
+
     val handlePlayRequest = { movie: Movie ->
         if (user?.isLoggedIn == true) {
-            viewModel.prepareAndPlay(movie) { url ->
-                onDirectPlayClick(movie, url)
-            }
+            playContent(movie)
         } else {
             pendingMovieToPlay = movie
             showAuthDialog = true
@@ -139,9 +153,9 @@ fun HomeScreen(
                     ) { page ->
                         Box(modifier = Modifier.fillMaxSize()) {
                             when (page) {
-                                0 -> HomeSectionsContent(homeSections, adsSpots, onMovieClick, handlePlayRequest)
-                                1 -> CategoryTabContent(movieSections, adsSpots, moviesListFiltered, selectedGenre, onMovieClick)
-                                2 -> CategoryTabContent(seriesSections, adsSpots, seriesListFiltered, selectedGenre, onMovieClick)
+                                0 -> HomeSectionsContent(homeSections, onMovieClick, handlePlayRequest)
+                                1 -> CategoryTabContent(movieSections, moviesListFiltered, selectedGenre, onMovieClick)
+                                2 -> CategoryTabContent(seriesSections, seriesListFiltered, selectedGenre, onMovieClick)
                                 3 -> ProfileScreenContent(
                                     user = user,
                                     watching = watchingContent,
@@ -161,7 +175,7 @@ fun HomeScreen(
             }
         }
 
-        // Top bar - Cargador infinito para scroll/refresco
+        // Top bar
         if (!isSearchActive) {
             Box(
                 modifier = Modifier
@@ -191,13 +205,24 @@ fun HomeScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text(
-                            text = "PELIS EL PRIMAZO",
-                            color = MaterialTheme.colorScheme.primary,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = 0.5.sp
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Image(
+                                painter = painterResource(id = R.drawable.app_logo),
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape), 
+                                contentScale = ContentScale.Crop
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = "PELIS EL PRIMAZO",
+                                color = MaterialTheme.colorScheme.primary,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Black,
+                                letterSpacing = 0.5.sp
+                            )
+                        }
                         IconButton(onClick = { viewModel.onSearchActiveChange(true) }) {
                             Icon(Icons.Default.Search, contentDescription = "Buscar", tint = Color.White)
                         }
@@ -244,7 +269,7 @@ fun HomeScreen(
             }
         }
 
-        // Overlay central para pre-extracción de video (Play) - PANTALLA COMPLETA NEGRA
+        // Overlay central para pre-extracción de video
         AnimatedVisibility(
             visible = isPreloading,
             enter = fadeIn(),
@@ -255,12 +280,12 @@ fun HomeScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color.Black)
-                    .clickable(enabled = false) {}, // Bloquear clicks
+                    .clickable(enabled = false) {}, 
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     ParticleLoading(size = 200.dp)
-                    Spacer(Modifier.height(24.dp))
+                    Spacer(modifier = Modifier.height(24.dp))
                     Text(
                         "Preparando el cine...",
                         color = Color.White.copy(alpha = 0.7f),
@@ -310,23 +335,68 @@ fun HomeScreen(
 
         if (showAuthDialog) {
             AuthDialog(
-                isLoading = isLoading,
+                isLoading = isLoadingAuth,
                 error = error,
                 onLogin = { e, p ->
                     viewModel.login(e, p) {
                         showAuthDialog = false
-                        pendingMovieToPlay?.let { handlePlayRequest(it) }
-                        pendingMovieToPlay = null
+                        coroutineScope.launch {
+                            delay(500)
+                            pendingMovieToPlay?.let { movie ->
+                                playContent(movie)
+                            }
+                            pendingMovieToPlay = null
+                        }
                     }
                 },
                 onRegister = { u, e, p ->
                     viewModel.register(u, e, p) {
                         showAuthDialog = false
-                        pendingMovieToPlay?.let { handlePlayRequest(it) }
-                        pendingMovieToPlay = null
+                        coroutineScope.launch {
+                            delay(500)
+                            pendingMovieToPlay?.let { movie ->
+                                playContent(movie)
+                            }
+                            pendingMovieToPlay = null
+                        }
                     }
                 },
                 onDismiss = { showAuthDialog = false }
+            )
+        }
+        
+        // Update Dialog
+        if (updateConfig?.isUpdateAvailable == true && showUpdateDialog) {
+            AlertDialog(
+                onDismissRequest = { showUpdateDialog = false },
+                title = { Text("¡Nueva versión disponible!", fontWeight = FontWeight.Black) },
+                text = { 
+                    Text(
+                        text = "Hay una actualización disponible (v${updateConfig?.latestVersionName}) de Pelis El Primazo con mejoras y nuevas funciones. ¿Quieres descargarla e instalarla ahora?",
+                        lineHeight = 20.sp
+                    ) 
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            updateConfig?.updateUrl?.let { url ->
+                                viewModel.startUpdate(url)
+                            }
+                            showUpdateDialog = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    ) {
+                        Text("Actualizar Ahora", color = Color.Black, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showUpdateDialog = false }) {
+                        Text("Más tarde", color = Color.Gray)
+                    }
+                },
+                containerColor = Color(0xFF1A1A1A),
+                titleContentColor = Color.White,
+                textContentColor = Color.LightGray
             )
         }
     }
@@ -725,12 +795,11 @@ fun CategoryBubbleItem(label: String, selected: Boolean, onClick: () -> Unit) {
 @Composable
 fun HomeSectionsContent(
     sections: List<HomeSection>, 
-    adsSpots: List<MyBidSpot>,
     onMovieClick: (Int) -> Unit,
     onDirectPlayClick: (Movie) -> Unit
 ) {
     LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 80.dp, bottom = 120.dp)) {
-        itemsIndexed(sections, key = { _, section -> section.title }) { index, section ->
+        itemsIndexed(sections, key = { _, section -> section.title }) { _, section ->
             Column(modifier = Modifier.padding(vertical = 12.dp)) {
                 Text(text = section.title, color = Color.White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp))
                 LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -743,20 +812,6 @@ fun HomeSectionsContent(
                     }
                 }
             }
-            
-            // Insertar anuncio cada 2 secciones si hay spots disponibles
-            if (index > 0 && index % 2 == 0 && adsSpots.isNotEmpty()) {
-                val adIndex = (index / 2 - 1) % adsSpots.size
-                adsSpots[adIndex].tag_url?.let { url ->
-                    MyBidBanner(
-                        adTagUrl = url,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(100.dp)
-                            .padding(vertical = 8.dp, horizontal = 16.dp)
-                    )
-                }
-            }
         }
     }
 }
@@ -764,7 +819,6 @@ fun HomeSectionsContent(
 @Composable
 fun CategoryTabContent(
     sections: List<HomeSection>,
-    adsSpots: List<MyBidSpot>,
     filteredList: List<Movie>,
     selectedGenre: String?,
     onMovieClick: (Int) -> Unit
@@ -773,26 +827,13 @@ fun CategoryTabContent(
         VerticalMovieGrid(movies = filteredList, onMovieClick = onMovieClick)
     } else {
         LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 80.dp, bottom = 120.dp)) {
-            itemsIndexed(sections, key = { _, section -> section.title }) { index, section ->
+            itemsIndexed(sections, key = { _, section -> section.title }) { _, section ->
                 Column(modifier = Modifier.padding(vertical = 12.dp)) {
                     Text(text = section.title, color = Color.White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp))
                     LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         items(section.items, key = { it.id }) { movie ->
                             MovieCardItem(movie, { onMovieClick(it) }, width = 130.dp)
                         }
-                    }
-                }
-                
-                if (index > 0 && index % 3 == 0 && adsSpots.isNotEmpty()) {
-                    val adIndex = (index / 3 - 1) % adsSpots.size
-                    adsSpots[adIndex].tag_url?.let { url ->
-                        MyBidBanner(
-                            adTagUrl = url,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(80.dp)
-                                .padding(vertical = 8.dp, horizontal = 16.dp)
-                        )
                     }
                 }
             }

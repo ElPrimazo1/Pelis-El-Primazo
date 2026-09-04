@@ -1,13 +1,16 @@
 package com.example.peliselprimazo.ui.screens.home
 
+import android.app.Activity
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.peliselprimazo.data.AdsManager
+import com.example.peliselprimazo.data.UpdateManager
 import com.example.peliselprimazo.data.extractor.StreamExtractorFactory
 import com.example.peliselprimazo.domain.model.ContentType
 import com.example.peliselprimazo.domain.model.Movie
 import com.example.peliselprimazo.domain.repository.MovieRepository
+import com.example.peliselprimazo.domain.usecase.GetUpdateConfigUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -17,7 +20,9 @@ import javax.inject.Inject
 class HomeViewModel @Inject constructor(
     private val repository: MovieRepository,
     private val extractorFactory: StreamExtractorFactory,
-    private val adsManager: AdsManager
+    private val adsManager: AdsManager,
+    private val getUpdateConfigUseCase: GetUpdateConfigUseCase,
+    private val updateManager: UpdateManager
 ) : ViewModel() {
 
     private val _isLoading = MutableStateFlow(true)
@@ -74,6 +79,10 @@ class HomeViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val adsSpots = adsManager.spots
+
+    // Update Configuration
+    val updateConfig = getUpdateConfigUseCase()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     val moviesListFiltered = combine(allContent, _selectedGenre) { list, genre ->
         list.filter { it.contentType == ContentType.MOVIE && (genre == null || it.genres.contains(genre)) }
@@ -135,7 +144,22 @@ class HomeViewModel @Inject constructor(
 
     init {
         refreshData()
+        syncConfig()
         viewModelScope.launch { adsManager.loadAds() }
+    }
+
+    fun syncConfig() {
+        viewModelScope.launch {
+            getUpdateConfigUseCase.sync()
+        }
+    }
+
+    fun startUpdate(url: String) {
+        updateManager.downloadAndInstall(url)
+    }
+
+    fun showInterstitial(activity: Activity, onAdDismissed: () -> Unit) {
+        adsManager.showInterstitialIfReady(activity, onAdDismissed)
     }
 
     fun refreshData() {
@@ -195,10 +219,12 @@ class HomeViewModel @Inject constructor(
             _isLoadingAuth.value = true
             try {
                 repository.register(u, e, p)
+                _isLoadingAuth.value = false
                 onSuccess()
             } catch (e: Exception) {
                 _error.value = e.message ?: "Error al registrarse"
-            } finally { _isLoadingAuth.value = false }
+                _isLoadingAuth.value = false
+            }
         }
     }
 
@@ -207,11 +233,17 @@ class HomeViewModel @Inject constructor(
             _error.value = null
             _isLoadingAuth.value = true
             try {
-                if (repository.login(e, p)) onSuccess()
-                else _error.value = "Credenciales incorrectas"
+                if (repository.login(e, p)) {
+                    _isLoadingAuth.value = false
+                    onSuccess()
+                } else {
+                    _error.value = "Credenciales incorrectas"
+                    _isLoadingAuth.value = false
+                }
             } catch (e: Exception) {
                 _error.value = e.message ?: "Error al iniciar sesión"
-            } finally { _isLoadingAuth.value = false }
+                _isLoadingAuth.value = false
+            }
         }
     }
 }

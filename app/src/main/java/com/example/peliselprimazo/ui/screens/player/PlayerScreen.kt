@@ -55,10 +55,8 @@ import androidx.media3.ui.PlayerView
 import com.example.peliselprimazo.domain.model.Movie
 import com.example.peliselprimazo.domain.model.ServerLink
 import com.example.peliselprimazo.ui.components.ParticleLoading
-import com.google.ads.interactivemedia.v3.api.AdEvent
 import com.google.ads.interactivemedia.v3.api.ImaSdkFactory
 import kotlinx.coroutines.delay
-import kotlin.math.abs
 
 @OptIn(UnstableApi::class)
 @SuppressLint("SourceLockedOrientationActivity")
@@ -161,32 +159,19 @@ fun VideoPlayerWithControls(
     onReportError: () -> Unit
 ) {
     val context = LocalContext.current
-    val tag = "ADS_LOG"
     val adUrl = state.adUrl
 
-    // 1. Cargador de anuncios con logs detallados
     val adsLoader = remember(adUrl) {
         if (!adUrl.isNullOrBlank()) {
-            Log.d(tag, "Configurando AdsLoader para: $adUrl")
             val sdkFactory = ImaSdkFactory.getInstance()
             val imaSdkSettings = sdkFactory.createImaSdkSettings().apply {
                 maxRedirects = 8
                 language = "es"
-                isDebugMode = true
             }
             ImaAdsLoader.Builder(context)
                 .setImaSdkSettings(imaSdkSettings)
-                .setAdEventListener { event ->
-                    Log.i(tag, "IMA EVENTO: ${event.type}")
-                }
-                .setAdErrorListener { error ->
-                    Log.e(tag, "IMA ERROR CRÍTICO: ${error.error.message}")
-                }
                 .build()
-        } else {
-            Log.w(tag, "No hay URL de anuncio disponible.")
-            null
-        }
+        } else null
     }
 
     val playerView = remember {
@@ -204,6 +189,8 @@ fun VideoPlayerWithControls(
     var isBuffering by remember { mutableStateOf(true) }
     var hasStartedPlaying by remember(state.videoUrl) { mutableStateOf(false) }
     var tracks by remember { mutableStateOf(Tracks.EMPTY) }
+    
+    var hasAutoPlayed by remember(state.videoUrl) { mutableStateOf(false) }
 
     val exoPlayer = remember(state.videoUrl, adsLoader) {
         val dataSourceFactory = DefaultHttpDataSource.Factory().apply {
@@ -212,7 +199,6 @@ fun VideoPlayerWithControls(
         val mediaSourceFactory = DefaultMediaSourceFactory(context).setDataSourceFactory(dataSourceFactory)
         
         adsLoader?.let { loader -> 
-            Log.d(tag, "Vinculando AdsLoader al MediaSource")
             mediaSourceFactory.setLocalAdInsertionComponents({ loader }, playerView) 
         }
 
@@ -229,7 +215,6 @@ fun VideoPlayerWithControls(
             mediaItemBuilder.setMimeType(MimeTypes.APPLICATION_M3U8)
         }
         if (!adUrl.isNullOrBlank()) {
-            Log.d(tag, ">>> SOLICITANDO EJECUCIÓN DE ANUNCIO: $adUrl")
             mediaItemBuilder.setAdsConfiguration(
                 MediaItem.AdsConfiguration.Builder(adUrl.toUri()).build()
             )
@@ -245,7 +230,6 @@ fun VideoPlayerWithControls(
             override fun onIsPlayingChanged(playing: Boolean) { 
                 isPlaying = playing
                 isAdActive = exoPlayer.isPlayingAd
-                Log.d(tag, "Estado: isPlaying=$playing, isAdActive=$isAdActive")
                 if (playing && !isAdActive) hasStartedPlaying = true
             }
             override fun onPlaybackStateChanged(s: Int) { 
@@ -255,17 +239,13 @@ fun VideoPlayerWithControls(
                     duration = exoPlayer.duration
                     if (!isAdActive) hasStartedPlaying = true
                 }
+                if (s == Player.STATE_ENDED && !hasAutoPlayed) {
+                    hasAutoPlayed = true
+                    state.nextLink?.let { onNextEpisode(it) }
+                }
             }
             override fun onPositionDiscontinuity(oldPos: Player.PositionInfo, newPos: Player.PositionInfo, reason: Int) {
                 isAdActive = exoPlayer.isPlayingAd || exoPlayer.currentAdGroupIndex != C.INDEX_UNSET
-                if (oldPos.adGroupIndex != C.INDEX_UNSET && newPos.adGroupIndex == C.INDEX_UNSET) {
-                    Log.i(tag, "Anuncio finalizado. Iniciando contenido principal.")
-                    hasStartedPlaying = true
-                    exoPlayer.play()
-                }
-            }
-            override fun onPlayerError(error: PlaybackException) { 
-                Log.e(tag, "Error ExoPlayer: ${error.message}")
             }
             override fun onTracksChanged(newTracks: Tracks) { tracks = newTracks }
         }
@@ -284,6 +264,12 @@ fun VideoPlayerWithControls(
             isAdActive = exoPlayer.isPlayingAd || exoPlayer.currentAdGroupIndex != C.INDEX_UNSET
             currentPosition = exoPlayer.currentPosition
             duration = exoPlayer.duration
+            
+            if (!isAdActive && !hasAutoPlayed && duration > 0 && (duration - currentPosition) <= 2000) {
+                hasAutoPlayed = true
+                state.nextLink?.let { onNextEpisode(it) }
+            }
+            
             delay(500)
         }
     }
@@ -295,7 +281,6 @@ fun VideoPlayerWithControls(
             modifier = Modifier.fillMaxSize()
         )
         
-        // VISIBILIDAD: El loading y controles se ocultan totalmente si el anuncio está activo para dejar ver la publicidad
         if (!isAdActive) {
             if (isBuffering || !hasStartedPlaying) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -312,7 +297,7 @@ fun VideoPlayerWithControls(
                 onBack = onBack,
                 onPlayPause = { if (isPlaying) exoPlayer.pause() else exoPlayer.play() },
                 onSeek = { exoPlayer.seekTo(it) },
-                onNextEpisode = state.nextLink?.let { { onNextEpisode(it) } },
+                onNextEpisode = state.nextLink?.let { { hasAutoPlayed = true; onNextEpisode(it) } },
                 onReportError = onReportError,
                 tracks = tracks,
                 onAudioTrackSelected = { trackGroup, trackIndex ->
@@ -342,6 +327,68 @@ fun VideoPlayerWithControls(
                 },
                 exoPlayer = exoPlayer
             )
+
+            val timeRemaining = duration - currentPosition
+            if (state.nextLink != null && duration > 0 && timeRemaining in 2001..20000) {
+                NextEpisodeOverlay(
+                    nextLink = state.nextLink,
+                    secondsRemaining = (timeRemaining / 1000).toInt(),
+                    onNext = { 
+                        hasAutoPlayed = true
+                        onNextEpisode(state.nextLink) 
+                    },
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 80.dp, end = 32.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun NextEpisodeOverlay(
+    nextLink: ServerLink,
+    secondsRemaining: Int,
+    onNext: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .width(220.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable { onNext() },
+        color = Color.Black.copy(alpha = 0.8f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(
+                    progress = { secondsRemaining / 20f },
+                    modifier = Modifier.size(40.dp),
+                    color = Color.Red,
+                    strokeWidth = 3.dp,
+                    trackColor = Color.White.copy(alpha = 0.1f)
+                )
+                Text(
+                    text = secondsRemaining.toString(),
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Column {
+                Text("SIGUIENTE", color = Color.Gray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    "Episodio ${nextLink.episode}",
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Black,
+                    maxLines = 1
+                )
+            }
         }
     }
 }
@@ -513,7 +560,7 @@ fun PlayerControls(
 
                             if (onNextEpisode != null) {
                                 Button(
-                                    onClick = onNextEpisode,
+                                    onClick = { onNextEpisode() },
                                     colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.15f)),
                                     shape = RoundedCornerShape(8.dp)
                                 ) {

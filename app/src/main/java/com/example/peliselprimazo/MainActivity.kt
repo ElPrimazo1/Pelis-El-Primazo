@@ -51,12 +51,16 @@ class MainActivity : ComponentActivity() {
     private var currentIntent by mutableStateOf<Intent?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        installSplashScreen()
+        val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
         
         currentIntent = intent
         enableEdgeToEdge()
         
+        // Revertimos: Volvemos a controlar la transición para que no haya pantalla negra
+        var isComposeReady by mutableStateOf(false)
+        splashScreen.setKeepOnScreenCondition { !isComposeReady }
+
         setContent {
             PelisElPrimazoTheme {
                 val homeViewModel: HomeViewModel = hiltViewModel()
@@ -66,10 +70,13 @@ class MainActivity : ComponentActivity() {
                 val showContent = hasFinishedIntro && !isLoading
 
                 RequestNotificationPermission()
+                
+                // Marcamos que la UI de carga ya está lista para mostrarse
+                SideEffect { isComposeReady = true }
 
                 Crossfade(
                     targetState = showContent,
-                    animationSpec = tween(durationMillis = 800),
+                    animationSpec = tween(durationMillis = 500),
                     label = "GlobalTransition"
                 ) { ready ->
                     if (!ready) {
@@ -162,10 +169,8 @@ fun MainContent(
                 DetailScreen(
                     viewModel = detailViewModel,
                     onBack = { navController.popBackStack() },
-                    onPlay = { server, fileId, adUrl -> 
-                        detailViewModel.prepareAndPlay(server, fileId, adUrl) { videoUrl, finalAdUrl ->
-                            navController.navigateToPlayer(server, fileId, movieId, videoUrl, finalAdUrl)
-                        }
+                    onPlay = { server, fileId, videoUrl -> 
+                        navController.navigateToPlayer(server, fileId, movieId, videoUrl)
                     }
                 )
             }

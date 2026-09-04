@@ -1,5 +1,6 @@
 package com.example.peliselprimazo.ui.screens.detail
 
+import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.*
@@ -31,12 +32,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
-import com.example.peliselprimazo.data.remote.MyBidSpot
 import com.example.peliselprimazo.domain.model.CastMember
 import com.example.peliselprimazo.domain.model.ContentType
 import com.example.peliselprimazo.domain.model.Movie
 import com.example.peliselprimazo.ui.components.AuthDialog
-import com.example.peliselprimazo.ui.components.MyBidBanner
 import com.example.peliselprimazo.ui.components.ParticleLoading
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -44,7 +43,7 @@ import com.example.peliselprimazo.ui.components.ParticleLoading
 fun DetailScreen(
     viewModel: DetailViewModel,
     onBack: () -> Unit,
-    onPlay: (String, String, String?) -> Unit // Actualizado para recibir adUrl
+    onPlay: (String, String, String?) -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val isPreloading by viewModel.preloadingVideo.collectAsState()
@@ -53,7 +52,6 @@ fun DetailScreen(
     val isViendo by viewModel.isViendo.collectAsState()
     val isTerminado by viewModel.isTerminado.collectAsState()
     val isVerDespues by viewModel.isVerDespues.collectAsState()
-    val adsSpots by viewModel.adsSpots.collectAsState()
     
     val user by viewModel.user.collectAsState()
     
@@ -73,6 +71,16 @@ fun DetailScreen(
             pendingAction = action
             showAuthDialog = true
         }
+    }
+
+    val playVideo = { server: String, fileId: String ->
+        viewModel.prepareAndPlay(server, fileId) { videoUrl, _ ->
+            onPlay(server, fileId, videoUrl)
+        }
+    }
+
+    val handlePlayRequest = { server: String, fileId: String ->
+        playVideo(server, fileId)
     }
 
     Scaffold(
@@ -102,7 +110,6 @@ fun DetailScreen(
                 is DetailUiState.Success -> {
                     DetailContent(
                         movie = state.movie,
-                        adsSpots = adsSpots,
                         isFavorito = isFavorito,
                         isViendo = isViendo,
                         isTerminado = isTerminado,
@@ -122,7 +129,7 @@ fun DetailScreen(
                                 val firstLink = state.movie.serverLinks.firstOrNull()
                                 if (firstLink != null) {
                                     handleActionWithAuth {
-                                        viewModel.onPlayRequested(firstLink.serverName, firstLink.fileId, onPlay)
+                                        handlePlayRequest(firstLink.serverName, firstLink.fileId)
                                     }
                                 }
                             } else {
@@ -145,7 +152,7 @@ fun DetailScreen(
                                 movie = state.movie,
                                 onEpisodeSelected = { server, fileId ->
                                     showEpisodeSheet = false
-                                    viewModel.onPlayRequested(server, fileId, onPlay)
+                                    handlePlayRequest(server, fileId)
                                 }
                             )
                         }
@@ -212,7 +219,6 @@ fun DetailScreen(
 @Composable
 fun DetailContent(
     movie: Movie,
-    adsSpots: List<MyBidSpot>,
     isFavorito: Boolean,
     isViendo: Boolean,
     isTerminado: Boolean,
@@ -239,38 +245,10 @@ fun DetailContent(
             )
         }
         
-        if (adsSpots.isNotEmpty()) {
-            item {
-                adsSpots.firstOrNull()?.tag_url?.let { url ->
-                    MyBidBanner(
-                        adTagUrl = url,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(80.dp)
-                            .padding(vertical = 12.dp, horizontal = 16.dp)
-                    )
-                }
-            }
-        }
-
         item { InfoSection(movie, onTrailerClick) }
         
         if (movie.cast.isNotEmpty()) {
             item { CastSection(movie.cast) }
-        }
-        
-        if (adsSpots.size > 1) {
-            item {
-                adsSpots[1].tag_url?.let { url ->
-                    MyBidBanner(
-                        adTagUrl = url,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(100.dp)
-                            .padding(vertical = 24.dp, horizontal = 16.dp)
-                    )
-                }
-            }
         }
         
         item { Spacer(modifier = Modifier.height(100.dp)) }

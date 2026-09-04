@@ -37,6 +37,9 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.regex.Pattern
 
 data class InternalFileInfo(
     val cleanTitle: String,
@@ -45,6 +48,33 @@ data class InternalFileInfo(
     val episode: Int?,
     val isTv: Boolean,
     val isAnime: Boolean
+)
+
+data class TmdbData(
+    val title: String,
+    val overview: String,
+    val posterUrl: String?,
+    val backdropUrl: String?,
+    val releaseDate: String?,
+    val rating: Double,
+    val genres: List<String>,
+    val trailerUrl: String?,
+    val cast: List<CastMember>,
+    val duration: String?
+)
+
+data class RemoteUserData(
+    val liked: List<Int> = emptyList(),
+    val saved: List<Int> = emptyList(),
+    val watchLater: List<Int> = emptyList(),
+    val finished: List<Int> = emptyList(),
+    val watching: Map<Int, RemoteWatchingProgress> = emptyMap()
+)
+
+data class RemoteWatchingProgress(
+    val position: Long,
+    val duration: Long,
+    val timestamp: Long
 )
 
 @Singleton
@@ -67,6 +97,8 @@ class MovieRepositoryImpl @Inject constructor(
     private val _currentUser = MutableStateFlow<User?>(null)
     private val _avatarOverride = MutableStateFlow<String?>(null)
 
+    private val lastProgressUpdate = mutableMapOf<Int, Long>()
+
     init {
         firebaseAuth.addAuthStateListener { auth ->
             val firebaseUser = auth.currentUser
@@ -79,7 +111,6 @@ class MovieRepositoryImpl @Inject constructor(
                 )
             } else {
                 _currentUser.value = null
-                // No limpiamos el override para que persista en la sesión si se seleccionó antes
             }
         }
     }
@@ -127,7 +158,7 @@ class MovieRepositoryImpl @Inject constructor(
         withContext(Dispatchers.IO) {
             val syncStartTime = System.currentTimeMillis()
             try {
-                syncUserData()
+                val remoteData = fetchRemoteUserData()
                 val allFiles = getStreamtapeFilesSafe()
                 
                 if (allFiles.isEmpty()) {
@@ -160,6 +191,17 @@ class MovieRepositoryImpl @Inject constructor(
                             } catch (_: Exception) { null }
                         }
 
+                        val isLiked = if (remoteData != null) remoteData.liked.contains(id) else existing?.isLiked ?: false
+                        val isSaved = if (remoteData != null) remoteData.saved.contains(id) else existing?.isSaved ?: false
+                        val isWatchLater = if (remoteData != null) remoteData.watchLater.contains(id) else existing?.isWatchLater ?: false
+                        val isFinished = if (remoteData != null) remoteData.finished.contains(id) else existing?.isFinished ?: false
+                        
+                        val remoteProgress = remoteData?.watching?.get(id)
+                        val isWatching = remoteProgress != null || (existing?.isWatching ?: false)
+                        val lastPos = remoteProgress?.position ?: existing?.lastPosition ?: 0L
+                        val totalDur = remoteProgress?.duration ?: existing?.totalDuration ?: 0L
+                        val timestamp = remoteProgress?.timestamp ?: existing?.timestamp ?: System.currentTimeMillis()
+
                         val entity = MovieEntity(
                             id = id,
                             title = tmdbData?.title ?: primaryInfo.cleanTitle.capitalizeWords(),
@@ -181,38 +223,22 @@ class MovieRepositoryImpl @Inject constructor(
                             season = primaryInfo.season,
                             episode = primaryInfo.episode,
                             duration = tmdbData?.duration ?: existing?.duration,
-                            isLiked = existing?.isLiked ?: false,
-                            isSaved = existing?.isSaved ?: false,
-                            isWatchLater = existing?.isWatchLater ?: false,
-                            isWatching = existing?.isWatching ?: false,
-                            isFinished = existing?.isFinished ?: false,
-                            lastPosition = existing?.lastPosition ?: 0L,
-                            totalDuration = existing?.totalDuration ?: 0L,
-                            timestamp = existing?.timestamp ?: System.currentTimeMillis(),
+                            isLiked = isLiked,
+                            isSaved = isSaved,
+                            isWatchLater = isWatchLater,
+                            isWatching = isWatching,
+                            isFinished = isFinished,
+                            lastPosition = lastPos,
+                            totalDuration = totalDur,
+                            timestamp = timestamp,
                             lastUpdated = syncStartTime
                         )
-                        
-                        if (existing != null && (existing.isLiked || existing.isWatching) && (entity.contentType == ContentType.TV.name || entity.contentType == ContentType.ANIME.name)) {
-                            val oldMaxEp = existing.serverLinks.maxOfOrNull { it.episode ?: 0 } ?: 0
-                            val newMaxEp = entity.serverLinks.maxOfOrNull { it.episode ?: 0 } ?: 0
-                            
-                            if (newMaxEp > oldMaxEp) {
-                                val latestLink = entity.serverLinks.maxByOrNull { it.episode ?: 0 }
-                                notificationHelper.showNewEpisodeNotification(
-                                    movieTitle = entity.title,
-                                    season = latestLink?.season,
-                                    episode = latestLink?.episode,
-                                    movieId = entity.id
-                                )
-                            }
-                        }
                         
                         entity
                     }
                 }
 
                 val results = deferredMovies.awaitAll()
-
                 if (results.isNotEmpty()) {
                     movieDao.insertMovies(results)
                     movieDao.deleteOldMovies(syncStartTime)
@@ -223,98 +249,129 @@ class MovieRepositoryImpl @Inject constructor(
         }
     }
 
-    private suspend fun syncUserData() {
-        val firebaseUser = firebaseAuth.currentUser ?: return
-        try {
+    private fun parseFileName(fileName: String): InternalFileInfo {
+        val nameWithoutExt = fileName.replace(Regex("\\.(mp4|mkv|avi|mov|wmv|flv|webm|m3u8)$", RegexOption.IGNORE_CASE), "")
+        var name = nameWithoutExt.replace(Regex("[._\\-/]"), " ")
+
+        val yearPattern = Pattern.compile("\\b(19|20)\\d{2}\\b")
+        val yearMatcher = yearPattern.matcher(name)
+        val year = if (yearMatcher.find()) yearMatcher.group() else null
+
+        val sePattern = Pattern.compile("(?i)S(\\d{1,2})E(\\d{1,3})|(\\d{1,2})x(\\d{1,3})")
+        val seMatcher = sePattern.matcher(name)
+        var season: Int? = null
+        var episode: Int? = null
+        var seMatch: String? = null
+        
+        if (seMatcher.find()) {
+            seMatch = seMatcher.group()
+            season = seMatcher.group(1)?.toIntOrNull() ?: seMatcher.group(3)?.toIntOrNull()
+            episode = seMatcher.group(2)?.toIntOrNull() ?: seMatcher.group(4)?.toIntOrNull()
+        }
+
+        val isAnime = name.lowercase().contains("anime")
+        val isTv = season != null || name.lowercase().contains("tv") || isAnime
+
+        var cleanTitle = name
+        
+        if (seMatch != null) {
+            val index = cleanTitle.indexOf(seMatch)
+            if (index != -1) {
+                cleanTitle = cleanTitle.substring(0, index)
+            }
+        }
+        
+        if (year != null) {
+            cleanTitle = cleanTitle.replace(year, "")
+        }
+
+        val noiseTags = listOf(
+            "1080p", "720p", "480p", "h264", "h265", "x264", "x265", 
+            "bluray", "webrip", "latino", "español", "castellano", "dual", 
+            "sub", "subs", "subtitulado", "multi", "hdrip", "dvdrip", "remux", "streamtape"
+        )
+        noiseTags.forEach { tag ->
+            cleanTitle = cleanTitle.replace(Regex("(?i)\\b$tag\\b"), "")
+        }
+
+        cleanTitle = cleanTitle.replace(Regex("[()\\[\\]{}]"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            
+        if (cleanTitle.isEmpty()) cleanTitle = nameWithoutExt.trim()
+
+        return InternalFileInfo(cleanTitle, year, season, episode, isTv, isAnime)
+    }
+
+    private suspend fun fetchTmdbData(info: InternalFileInfo): TmdbData? {
+        return try {
+            val id = if (info.isTv || info.isAnime) {
+                tmdbApi.searchTv(info.cleanTitle, info.year).results.firstOrNull()?.id
+            } else {
+                tmdbApi.searchMovie(info.cleanTitle, info.year).results.firstOrNull()?.id
+            } ?: return null
+            
+            if (info.isTv || info.isAnime) {
+                val details = tmdbApi.getTvDetails(id)
+                TmdbData(
+                    title = details.name,
+                    overview = details.overview,
+                    posterUrl = details.posterPath?.let { "https://image.tmdb.org/t/p/w500$it" },
+                    backdropUrl = details.backdropPath?.let { "https://image.tmdb.org/t/p/w780$it" },
+                    releaseDate = details.firstAirDate,
+                    rating = details.voteAverage,
+                    genres = details.genres?.map { it.name } ?: emptyList(),
+                    trailerUrl = details.videos?.results?.firstOrNull { it.site == "YouTube" && it.type == "Trailer" }?.let { "https://www.youtube.com/watch?v=${it.key}" },
+                    cast = details.credits?.cast?.take(10)?.map { CastMember(it.name, it.character, it.profilePath?.let { p -> "https://image.tmdb.org/t/p/w185$p" }) } ?: emptyList(),
+                    duration = details.episodeRunTime?.firstOrNull()?.let { "$it min" }
+                )
+            } else {
+                val details = tmdbApi.getMovieDetails(id)
+                TmdbData(
+                    title = details.title,
+                    overview = details.overview,
+                    posterUrl = details.posterPath?.let { "https://image.tmdb.org/t/p/w500$it" },
+                    backdropUrl = details.backdropPath?.let { "https://image.tmdb.org/t/p/w780$it" },
+                    releaseDate = details.releaseDate,
+                    rating = details.voteAverage,
+                    genres = details.genres?.map { it.name } ?: emptyList(),
+                    trailerUrl = details.videos?.results?.firstOrNull { it.site == "YouTube" && it.type == "Trailer" }?.let { "https://www.youtube.com/watch?v=${it.key}" },
+                    cast = details.credits?.cast?.take(10)?.map { CastMember(it.name, it.character, it.profilePath?.let { p -> "https://image.tmdb.org/t/p/w185$p" }) } ?: emptyList(),
+                    duration = details.runtime?.let { "$it min" }
+                )
+            }
+        } catch (e: Exception) {
+            Log.e("TMDB", "Error fetching data for ${info.cleanTitle}: ${e.message}")
+            null
+        }
+    }
+
+    private suspend fun fetchRemoteUserData(): RemoteUserData? {
+        val firebaseUser = firebaseAuth.currentUser ?: return null
+        return try {
             val doc = firestore.collection("users").document(firebaseUser.uid).get().await()
             if (doc.exists()) {
                 val liked = (doc.get("liked") as? List<*>)?.mapNotNull { (it as? Long)?.toInt() } ?: emptyList()
                 val saved = (doc.get("saved") as? List<*>)?.mapNotNull { (it as? Long)?.toInt() } ?: emptyList()
                 val watchLater = (doc.get("watchLater") as? List<*>)?.mapNotNull { (it as? Long)?.toInt() } ?: emptyList()
                 val finished = (doc.get("finished") as? List<*>)?.mapNotNull { (it as? Long)?.toInt() } ?: emptyList()
+                
+                val watchingMap = doc.get("watching") as? Map<String, Map<String, Any>> ?: emptyMap()
+                val watching = watchingMap.mapNotNull { (idStr, data) ->
+                    val id = idStr.toIntOrNull() ?: return@mapNotNull null
+                    id to RemoteWatchingProgress(
+                        position = (data["position"] as? Long) ?: 0L,
+                        duration = (data["duration"] as? Long) ?: 0L,
+                        timestamp = (data["timestamp"] as? Long) ?: System.currentTimeMillis()
+                    )
+                }.toMap()
 
-                liked.forEach { movieDao.updateLiked(it, true) }
-                saved.forEach { movieDao.updateSaved(it, true) }
-                watchLater.forEach { movieDao.updateWatchLater(it, true) }
-                finished.forEach { movieDao.updateFinished(it, true) }
-            }
+                RemoteUserData(liked, saved, watchLater, finished, watching)
+            } else null
         } catch (e: Exception) {
-            Log.e("PrimazoSync", "Error sincronizando datos de usuario: ${e.message}")
+            Log.e("PrimazoSync", "Error fetching remote data: ${e.message}")
+            null
         }
-    }
-
-    private suspend fun fetchTmdbData(info: InternalFileInfo): TmdbData? {
-        return if (info.isTv || info.isAnime) {
-            val search = tmdbApi.searchTv(query = info.cleanTitle, year = info.year)
-            val result = search.results.firstOrNull()
-            if (result != null) {
-                val detail = tmdbApi.getTvDetails(tvId = result.id)
-                TmdbData(
-                    title = result.name,
-                    overview = result.overview,
-                    posterUrl = result.posterPath?.let { "${TmdbApi.IMAGE_BASE_URL}$it" },
-                    backdropUrl = result.backdropPath?.let { "${TmdbApi.IMAGE_BASE_URL}$it" },
-                    releaseDate = result.firstAirDate,
-                    rating = result.voteAverage ?: 0.0,
-                    genres = detail.genres?.map { it.name } ?: emptyList(),
-                    trailerUrl = detail.videos?.results?.firstOrNull { it.site == "YouTube" && it.type == "Trailer" }?.let { "https://www.youtube.com/watch?v=${it.key}" },
-                    cast = detail.credits?.cast?.take(10)?.map { CastMember(it.name, it.character, it.profile_path?.let { p -> "${TmdbApi.IMAGE_BASE_URL}$p" }) } ?: emptyList(),
-                    duration = detail.episodeRunTime?.firstOrNull()?.let { "$it min" }
-                )
-            } else null
-        } else {
-            val search = tmdbApi.searchMovie(query = info.cleanTitle, year = info.year)
-            val result = search.results.firstOrNull()
-            if (result != null) {
-                val detail = tmdbApi.getMovieDetails(movieId = result.id)
-                TmdbData(
-                    title = result.title,
-                    overview = result.overview,
-                    posterUrl = result.posterPath?.let { "${TmdbApi.IMAGE_BASE_URL}$it" },
-                    backdropUrl = result.backdropPath?.let { "${TmdbApi.IMAGE_BASE_URL}$it" },
-                    releaseDate = result.releaseDate,
-                    rating = result.voteAverage ?: 0.0,
-                    genres = detail.genres?.map { it.name } ?: emptyList(),
-                    trailerUrl = detail.videos?.results?.firstOrNull { it.site == "YouTube" && it.type == "Trailer" }?.let { "https://www.youtube.com/watch?v=${it.key}" },
-                    cast = detail.credits?.cast?.take(10)?.map { CastMember(it.name, it.character, it.profile_path?.let { p -> "${TmdbApi.IMAGE_BASE_URL}$p" }) } ?: emptyList(),
-                    duration = detail.runtime?.let { "$it min" }
-                )
-            } else null
-        }
-    }
-
-    private data class TmdbData(
-        val title: String,
-        val overview: String?,
-        val posterUrl: String?,
-        val backdropUrl: String?,
-        val releaseDate: String?,
-        val rating: Double,
-        val genres: List<String>,
-        val trailerUrl: String?,
-        val cast: List<CastMember>,
-        val duration: String? = null
-    )
-
-    private fun parseFileName(name: String): InternalFileInfo {
-        val noExt = name.substringBeforeLast(".")
-        val cleaned = noExt.replace(Regex("[._-]"), " ").trim()
-        val yearMatch = Regex("\\b(19|20)\\d{2}\\b").find(cleaned)
-        val year = yearMatch?.value
-        val seMatch = Regex("(?i)S(\\d{1,2})\\s?[Ex ]?\\s?(\\d{1,3})|\\b(\\d{1,2})x(\\d{1,3})\\b").find(cleaned)
-        var s: Int? = null
-        var e: Int? = null
-        if (seMatch != null) {
-            s = (seMatch.groupValues[1].ifEmpty { seMatch.groupValues[3] }).toIntOrNull()
-            e = (seMatch.groupValues[2].ifEmpty { seMatch.groupValues[4] }).toIntOrNull()
-        }
-        var title = cleaned
-        year?.let { title = title.replace(it, "") }
-        seMatch?.let { title = title.replace(it.value, "") }
-        val junk = listOf("(?i)\\b(1080p|720p|480p|dual|latino|castellano|multi|sub|bluray|web-dl|hdrip|thumb|preview|sample|mp4|mkv|x264|x265|h264|h265)\\b", "[\\[\\(].*?[\\]\\)]", "(?i)^thumb\\s+")
-        junk.forEach { pattern -> title = title.replace(Regex(pattern), " ") }
-        val finalTitle = title.trim().replace(Regex("\\s+"), " ")
-        return InternalFileInfo(if (finalTitle.length < 2) cleaned else finalTitle, year, s, e, s != null || cleaned.contains("Temporada", true), cleaned.contains("Anime", true))
     }
 
     override suspend fun getMovieById(id: Int): Movie? {
@@ -359,6 +416,20 @@ class MovieRepositoryImpl @Inject constructor(
     override suspend fun getDownloadUrl(serverName: String, fileId: String): String? = withContext(Dispatchers.IO) {
         try {
             if (serverName.contains("Streamtape", true)) {
+                // Registro de vista silencioso para Streamtape para que no borren el video
+                try {
+                    val embedUrl = "https://streamtape.com/e/$fileId"
+                    val connection = URL(embedUrl).openConnection() as HttpURLConnection
+                    connection.requestMethod = "GET"
+                    connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36")
+                    connection.connectTimeout = 5000
+                    connection.readTimeout = 5000
+                    connection.responseCode // Disparar petición para contar la vista
+                    connection.disconnect()
+                } catch (e: Exception) {
+                    Log.e("StreamtapeHit", "Error al registrar vista: ${e.message}")
+                }
+
                 val tResponse = streamtapeApi.getDownloadTicket(fileId, streamtapeLogin, streamtapeKey)
                 val t = tResponse.result ?: return@withContext null
                 delay(t.waitTime * 1000L + 200) 
@@ -406,12 +477,10 @@ class MovieRepositoryImpl @Inject constructor(
             val userRef = firestore.collection("users").document(user.uid)
             if (newValue) {
                 userRef.update("liked", FieldValue.arrayUnion(movieId)).await()
-                // Update trends
                 firestore.collection("trends").document(movieId.toString())
                     .set(mapOf("count" to FieldValue.increment(1)), com.google.firebase.firestore.SetOptions.merge())
             } else {
                 userRef.update("liked", FieldValue.arrayRemove(movieId)).await()
-                // Update trends
                 firestore.collection("trends").document(movieId.toString())
                     .set(mapOf("count" to FieldValue.increment(-1)), com.google.firebase.firestore.SetOptions.merge())
             }
@@ -464,12 +533,38 @@ class MovieRepositoryImpl @Inject constructor(
     }
 
     override suspend fun addToWatching(movieId: Int) {
-        movieDao.updateWatching(movieId, true, System.currentTimeMillis())
+        val timestamp = System.currentTimeMillis()
+        movieDao.updateWatching(movieId, true, timestamp)
+        
+        firebaseAuth.currentUser?.let { user ->
+            val userRef = firestore.collection("users").document(user.uid)
+            userRef.update("watching.$movieId.timestamp", timestamp).await()
+            
+            // Incrementar contador de visualizaciones global en Firebase para tendencias
+            firestore.collection("trends").document(movieId.toString())
+                .set(mapOf("views" to FieldValue.increment(1)), com.google.firebase.firestore.SetOptions.merge())
+        }
     }
 
     override suspend fun updatePlaybackProgress(movieId: Int, position: Long, duration: Long) {
         movieDao.updatePlaybackProgress(movieId, position, duration)
         
+        val now = System.currentTimeMillis()
+        val lastUpdate = lastProgressUpdate[movieId] ?: 0L
+        
+        if (now - lastUpdate > 10000) {
+            firebaseAuth.currentUser?.let { user ->
+                val userRef = firestore.collection("users").document(user.uid)
+                val data = mapOf(
+                    "watching.$movieId.position" to position,
+                    "watching.$movieId.duration" to duration,
+                    "watching.$movieId.timestamp" to now
+                )
+                userRef.update(data)
+                lastProgressUpdate[movieId] = now
+            }
+        }
+
         if (duration > 0 && position.toDouble() / duration.toDouble() > 0.95) {
             val m = movieDao.getMovieById(movieId)
             if (m != null && !m.isFinished) {
@@ -531,30 +626,40 @@ class MovieRepositoryImpl @Inject constructor(
     }
 
     override suspend fun register(username: String, email: String, password: String) {
-        val result = firebaseAuth.createUserWithEmailAndPassword(email, password).await()
-        result.user?.let { firebaseUser ->
-            val profileUpdates = UserProfileChangeRequest.Builder()
-                .setDisplayName(username)
-                .build()
-            firebaseUser.updateProfile(profileUpdates).await()
-            
-            val userData = mapOf(
-                "username" to username,
-                "email" to email,
-                "createdAt" to System.currentTimeMillis(),
-                "liked" to emptyList<Int>(),
-                "saved" to emptyList<Int>(),
-                "watchLater" to emptyList<Int>(),
-                "finished" to emptyList<Int>()
-            )
-            firestore.collection("users").document(firebaseUser.uid).set(userData).await()
+        withContext(Dispatchers.IO) {
+            try {
+                val result = firebaseAuth.createUserWithEmailAndPassword(email, password).await()
+                val firebaseUser = result.user ?: throw Exception("Error al crear usuario")
+                
+                val profileUpdates = UserProfileChangeRequest.Builder()
+                    .setDisplayName(username)
+                    .build()
+                firebaseUser.updateProfile(profileUpdates).await()
+                
+                val userData = mapOf(
+                    "username" to username,
+                    "email" to email,
+                    "createdAt" to System.currentTimeMillis(),
+                    "liked" to emptyList<Int>(),
+                    "saved" to emptyList<Int>(),
+                    "watchLater" to emptyList<Int>(),
+                    "finished" to emptyList<Int>(),
+                    "watching" to emptyMap<String, Any>()
+                )
+                firestore.collection("users").document(firebaseUser.uid).set(userData).await()
+                
+                _currentUser.value = User(username, email, null, true)
+                
+            } catch (e: Exception) {
+                Log.e("Auth", "Registro fallido", e)
+                throw e
+            }
         }
     }
 
     override suspend fun login(email: String, password: String): Boolean {
         return try {
             firebaseAuth.signInWithEmailAndPassword(email, password).await()
-            syncUserData()
             true
         } catch (_: Exception) {
             false
@@ -567,7 +672,6 @@ class MovieRepositoryImpl @Inject constructor(
     }
 
     override suspend fun updateAvatar(uri: String) {
-        // Actualización inmediata para la UI
         _avatarOverride.value = uri
 
         try {

@@ -52,7 +52,6 @@ class PlayerViewModel @Inject constructor(
         val fileId: String? = savedStateHandle["fileId"]
         val movieId: Int? = savedStateHandle["movieId"]
         val videoUrl: String? = savedStateHandle["videoUrl"]
-        // Aceptamos un adUrl opcional desde la navegación para evitar doble rotación
         val passedAdUrl: String? = savedStateHandle["adUrl"]
 
         Log.d(tag, "Init PlayerViewModel con: server=$serverName, movieId=$movieId, videoUrl=$videoUrl")
@@ -75,7 +74,8 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch {
             val currentState = _uiState.value
             
-            if (currentState is PlayerUiState.Success && currentState.currentLink?.fileId == fileId) return@launch
+            // Si ya estamos cargando este mismo fileId, ignoramos para evitar bucles
+            if (currentState is PlayerUiState.Success && currentState.currentLink?.fileId == fileId && !currentState.isChangingEpisode) return@launch
 
             if (currentState is PlayerUiState.Success) {
                 _uiState.value = currentState.copy(isChangingEpisode = true)
@@ -104,7 +104,6 @@ class PlayerViewModel @Inject constructor(
                     val currentLink = movie.serverLinks.find { it.fileId == fileId }
                     val nextLink = findNextEpisode(movie, currentLink)
 
-                    // Obtenemos el anuncio usando la rotación (Round Robin) si no viene pre-cargado
                     val adUrl = preloadedAdUrl ?: adsManager.getPlayerAdUrl()
 
                     _uiState.value = PlayerUiState.Success(
@@ -133,10 +132,29 @@ class PlayerViewModel @Inject constructor(
 
     private fun findNextEpisode(movie: Movie, current: ServerLink?): ServerLink? {
         if (current == null || current.episode == null) return null
-        return movie.serverLinks
+        
+        // Prioridad 1: Siguiente episodio en el MISMO servidor
+        val nextInSameServer = movie.serverLinks
+            .filter { it.season == current.season && it.serverName == current.serverName }
+            .find { it.episode == current.episode + 1 }
+        if (nextInSameServer != null) return nextInSameServer
+
+        // Prioridad 2: Siguiente episodio en CUALQUIER servidor
+        val nextInAnyServer = movie.serverLinks
             .filter { it.season == current.season }
-            .find { it.episode == current.episode!! + 1 }
-            ?: movie.serverLinks.find { it.season == (current.season ?: 0) + 1 && it.episode == 1 }
+            .find { it.episode == current.episode + 1 }
+        if (nextInAnyServer != null) return nextInAnyServer
+
+        // Prioridad 3: Primer episodio de la SIGUIENTE temporada en el MISMO servidor
+        val nextSeasonSameServer = movie.serverLinks
+            .filter { it.season == (current.season ?: 0) + 1 && it.serverName == current.serverName }
+            .find { it.episode == 1 }
+        if (nextSeasonSameServer != null) return nextSeasonSameServer
+
+        // Prioridad 4: Primer episodio de la SIGUIENTE temporada en CUALQUIER servidor
+        return movie.serverLinks
+            .filter { it.season == (current.season ?: 0) + 1 }
+            .find { it.episode == 1 }
     }
 
     fun updateProgress(position: Long, duration: Long) {

@@ -84,28 +84,6 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    @Named("MyBidRetrofit")
-    fun provideMyBidRetrofit(okHttpClient: OkHttpClient): Retrofit {
-        return Retrofit.Builder()
-            .baseUrl(MyBidApi.BASE_URL)
-            .client(okHttpClient)
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-    }
-
-    @Provides
-    @Singleton
-    @Named("ClickaduRetrofit")
-    fun provideClickaduRetrofit(okHttpClient: OkHttpClient): Retrofit {
-        return Retrofit.Builder()
-            .baseUrl(ClickaduApi.BASE_URL)
-            .client(okHttpClient)
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-    }
-
-    @Provides
-    @Singleton
     fun provideStreamtapeApi(@Named("StreamtapeRetrofit") retrofit: Retrofit): StreamtapeApi {
         return retrofit.create(StreamtapeApi::class.java)
     }
@@ -114,17 +92,5 @@ object NetworkModule {
     @Singleton
     fun provideTmdbApi(@Named("TmdbRetrofit") retrofit: Retrofit): TmdbApi {
         return retrofit.create(TmdbApi::class.java)
-    }
-
-    @Provides
-    @Singleton
-    fun provideMyBidApi(@Named("MyBidRetrofit") retrofit: Retrofit): MyBidApi {
-        return retrofit.create(MyBidApi::class.java)
-    }
-
-    @Provides
-    @Singleton
-    fun provideClickaduApi(@Named("ClickaduRetrofit") retrofit: Retrofit): ClickaduApi {
-        return retrofit.create(ClickaduApi::class.java)
     }
 }

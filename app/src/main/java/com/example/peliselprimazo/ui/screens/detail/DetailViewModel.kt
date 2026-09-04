@@ -1,12 +1,12 @@
 package com.example.peliselprimazo.ui.screens.detail
 
+import android.app.Activity
 import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.peliselprimazo.data.AdsManager
 import com.example.peliselprimazo.data.extractor.StreamExtractorFactory
-import com.example.peliselprimazo.data.remote.MyBidSpot
 import com.example.peliselprimazo.domain.model.Movie
 import com.example.peliselprimazo.domain.repository.MovieRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -53,13 +53,8 @@ class DetailViewModel @Inject constructor(
     val isVerDespues = repository.isMovieInWatchLater(movieId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
-    val adsSpots: StateFlow<List<MyBidSpot>> = adsManager.spots
-
     init {
         loadMovieDetail()
-        viewModelScope.launch {
-            adsManager.loadAds()
-        }
     }
 
     fun loadMovieDetail() {
@@ -78,20 +73,13 @@ class DetailViewModel @Inject constructor(
         }
     }
 
-    fun onPlayRequested(
-        server: String, 
-        fileId: String, 
-        onPlayAction: (String, String, String?) -> Unit
-    ) {
-        Log.d(tag, "Reproducción solicitada. Obteniendo anuncio...")
-        val adUrl = adsManager.getPlayerAdUrl()
-        onPlayAction(server, fileId, adUrl)
+    fun showInterstitial(activity: Activity, onAdDismissed: () -> Unit) {
+        adsManager.showInterstitialIfReady(activity, onAdDismissed)
     }
 
     fun prepareAndPlay(
         server: String, 
         fileId: String, 
-        adUrl: String? = null,
         onReady: (String, String?) -> Unit
     ) {
         viewModelScope.launch {
@@ -100,10 +88,8 @@ class DetailViewModel @Inject constructor(
                 val extractor = extractorFactory.getExtractor(server)
                 val videoUrl = extractor.extract(fileId, repository)
                 if (!videoUrl.isNullOrBlank()) {
-                    // NO codificamos aquí para evitar doble codificación.
-                    // MainActivity.navigateToPlayer se encargará de codificar para la ruta.
                     Log.d(tag, "Video extraído correctamente. Pasando al reproductor.")
-                    onReady(videoUrl, adUrl)
+                    onReady(videoUrl, null)
                 } else {
                     _error.value = "No se pudo obtener el enlace de video"
                 }
@@ -126,11 +112,17 @@ class DetailViewModel @Inject constructor(
             _isLoadingAuth.value = true
             _error.value = null
             try {
-                if (repository.login(e, p)) onSuccess()
-                else _error.value = "Credenciales incorrectas"
+                if (repository.login(e, p)) {
+                    _isLoadingAuth.value = false
+                    onSuccess()
+                } else {
+                    _error.value = "Credenciales incorrectas"
+                    _isLoadingAuth.value = false
+                }
             } catch (e: Exception) {
                 _error.value = e.message ?: "Error al iniciar sesión"
-            } finally { _isLoadingAuth.value = false }
+                _isLoadingAuth.value = false
+            }
         }
     }
 
@@ -140,10 +132,12 @@ class DetailViewModel @Inject constructor(
             _error.value = null
             try {
                 repository.register(u, e, p)
+                _isLoadingAuth.value = false
                 onSuccess()
             } catch (e: Exception) {
                 _error.value = e.message ?: "Error al registrarse"
-            } finally { _isLoadingAuth.value = false }
+                _isLoadingAuth.value = false
+            }
         }
     }
 }

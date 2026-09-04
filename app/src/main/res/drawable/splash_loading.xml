@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- El Logo -->
+    <item
+        android:drawable="@drawable/app_logo"
+        android:width="200dp"
+        android:height="200dp"
+        android:gravity="center" />
+
+    <!-- Simulación de la barra de carga (estática) -->
+    <!-- La bajamos un poco para que no se pegue al logo -->
+    <item
+        android:top="110dp"
+        android:gravity="center">
+        <shape android:shape="rectangle">
+            <size android:width="140dp" android:height="4dp" />
+            <corners android:radius="2dp" />
+            <solid android:color="#33FFFFFF" />
+        </shape>
+    </item>
+</layer-list>

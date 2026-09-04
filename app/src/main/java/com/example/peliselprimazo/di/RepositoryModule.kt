@@ -1,6 +1,8 @@
 package com.example.peliselprimazo.di
 
+import com.example.peliselprimazo.data.repository.ConfigRepositoryImpl
 import com.example.peliselprimazo.data.repository.MovieRepositoryImpl
+import com.example.peliselprimazo.domain.repository.ConfigRepository
 import com.example.peliselprimazo.domain.repository.MovieRepository
 import dagger.Binds
 import dagger.Module
@@ -17,4 +19,10 @@ abstract class RepositoryModule {
     abstract fun bindMovieRepository(
         movieRepositoryImpl: MovieRepositoryImpl
     ): MovieRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindConfigRepository(
+        configRepositoryImpl: ConfigRepositoryImpl
+    ): ConfigRepository
 }
