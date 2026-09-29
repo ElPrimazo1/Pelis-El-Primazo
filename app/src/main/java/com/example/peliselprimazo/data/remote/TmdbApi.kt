@@ -11,27 +11,27 @@ interface TmdbApi {
     suspend fun searchMovie(
         @Query("query") query: String,
         @Query("year") year: String? = null,
-        @Query("language") language: String = "es-ES"
+        @Query("language") language: String = "es-MX"
     ): TmdbSearchResponse<TmdbMovieResult>
 
     @GET("search/tv")
     suspend fun searchTv(
         @Query("query") query: String,
         @Query("first_air_date_year") year: String? = null,
-        @Query("language") language: String = "es-ES"
+        @Query("language") language: String = "es-MX"
     ): TmdbSearchResponse<TmdbTvResult>
 
     @GET("movie/{movie_id}")
     suspend fun getMovieDetails(
         @Path("movie_id") movieId: Int,
-        @Query("language") language: String = "es-ES",
+        @Query("language") language: String = "es-MX",
         @Query("append_to_response") append: String = "videos,credits"
     ): TmdbMovieDetail
 
     @GET("tv/{tv_id}")
     suspend fun getTvDetails(
         @Path("tv_id") tvId: Int,
-        @Query("language") language: String = "es-ES",
+        @Query("language") language: String = "es-MX",
         @Query("append_to_response") append: String = "videos,credits"
     ): TmdbTvDetail
 

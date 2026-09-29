@@ -73,8 +73,9 @@ class DetailViewModel @Inject constructor(
         }
     }
 
-    fun showInterstitial(activity: Activity, onAdDismissed: () -> Unit) {
-        adsManager.showInterstitialIfReady(activity, onAdDismissed)
+    // Actualizado: Ahora acepta placementName para Unity Ads
+    fun showRewardedVideo(activity: Activity, placementName: String? = null, onReward: () -> Unit) {
+        adsManager.showRewardedVideo(activity, placementName, onReward)
     }
 
     fun prepareAndPlay(

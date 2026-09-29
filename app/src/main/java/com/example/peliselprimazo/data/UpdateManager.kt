@@ -22,7 +22,7 @@ class UpdateManager @Inject constructor(
     private val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
     private var downloadId: Long = -1
 
-    fun downloadAndInstall(url: String, fileName: String = "PelisElPrimazo_Update.apk") {
+    fun downloadAndInstall(url: String, fileName: String = "CFilm_Update.apk") {
         val file = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), fileName)
         if (file.exists()) {
             file.delete()
@@ -30,7 +30,7 @@ class UpdateManager @Inject constructor(
 
         val request = DownloadManager.Request(Uri.parse(url))
             .setTitle("Descargando actualización")
-            .setDescription("Pelis El Primazo se está actualizando...")
+            .setDescription("CFilm se está actualizando...")
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
             .setDestinationInExternalFilesDir(context, Environment.DIRECTORY_DOWNLOADS, fileName)
             .setAllowedOverMetered(true)

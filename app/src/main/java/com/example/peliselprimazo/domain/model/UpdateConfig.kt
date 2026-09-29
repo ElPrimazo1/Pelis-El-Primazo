@@ -4,5 +4,6 @@ data class UpdateConfig(
     val latestVersionCode: Int,
     val latestVersionName: String,
     val updateUrl: String,
-    val isUpdateAvailable: Boolean = false
+    val isUpdateAvailable: Boolean = false,
+    val visualFlags: Map<String, String> = emptyMap()
 )

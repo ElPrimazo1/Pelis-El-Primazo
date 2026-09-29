@@ -24,7 +24,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import androidx.navigation.NavType
@@ -33,6 +32,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.example.peliselprimazo.data.AdsManager
 import com.example.peliselprimazo.ui.navigation.Screen
 import com.example.peliselprimazo.ui.screens.detail.DetailScreen
 import com.example.peliselprimazo.ui.screens.detail.DetailViewModel
@@ -40,56 +40,57 @@ import com.example.peliselprimazo.ui.screens.home.HomeScreen
 import com.example.peliselprimazo.ui.screens.home.HomeViewModel
 import com.example.peliselprimazo.ui.screens.player.PlayerScreen
 import com.example.peliselprimazo.ui.screens.player.PlayerViewModel
-import com.example.peliselprimazo.ui.screens.splash.SplashScreen
-import com.example.peliselprimazo.ui.theme.PelisElPrimazoTheme
+import com.example.peliselprimazo.ui.theme.CFilmTheme
 import dagger.hilt.android.AndroidEntryPoint
 import java.net.URLEncoder
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
+    @Inject
+    lateinit var adsManager: AdsManager
+
     private var currentIntent by mutableStateOf<Intent?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
+        
+        adsManager.init(this)
         
         currentIntent = intent
         enableEdgeToEdge()
         
-        // Revertimos: Volvemos a controlar la transición para que no haya pantalla negra
-        var isComposeReady by mutableStateOf(false)
-        splashScreen.setKeepOnScreenCondition { !isComposeReady }
-
         setContent {
-            PelisElPrimazoTheme {
-                val homeViewModel: HomeViewModel = hiltViewModel()
-                val isLoading by homeViewModel.isLoading.collectAsState()
-                var hasFinishedIntro by rememberSaveable { mutableStateOf(false) }
-                
-                val showContent = hasFinishedIntro && !isLoading
+            val homeViewModel: HomeViewModel = hiltViewModel()
+            val updateConfig by homeViewModel.updateConfig.collectAsState()
+            
+            val primaryOverride = updateConfig?.visualFlags?.get("ui_primary_color")
+            val secondaryOverride = updateConfig?.visualFlags?.get("ui_secondary_color")
 
+            CFilmTheme(
+                primaryOverride = primaryOverride,
+                secondaryOverride = secondaryOverride
+            ) {
                 RequestNotificationPermission()
                 
-                // Marcamos que la UI de carga ya está lista para mostrarse
-                SideEffect { isComposeReady = true }
-
-                Crossfade(
-                    targetState = showContent,
-                    animationSpec = tween(durationMillis = 500),
-                    label = "GlobalTransition"
-                ) { ready ->
-                    if (!ready) {
-                        SplashScreen(onAnimationFinished = { hasFinishedIntro = true })
-                    } else {
-                        MainContent(
-                            homeViewModel = homeViewModel, 
-                            intent = currentIntent
-                        )
-                    }
-                }
+                MainContent(
+                    homeViewModel = homeViewModel, 
+                    intent = currentIntent,
+                    adsManager = adsManager
+                )
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        adsManager.onResume(this)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        adsManager.onPause(this)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -118,8 +119,11 @@ fun RequestNotificationPermission() {
 @Composable
 fun MainContent(
     homeViewModel: HomeViewModel, 
-    intent: Intent?
+    intent: Intent?,
+    adsManager: AdsManager
 ) {
+    val context = LocalContext.current
+    val activity = context as ComponentActivity
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route ?: ""
@@ -152,9 +156,11 @@ fun MainContent(
                 HomeScreen(
                     viewModel = homeViewModel,
                     onMovieClick = { movieId -> navController.navigate(Screen.Detail.createRoute(movieId)) },
-                    onDirectPlayClick = { movie, url ->
+                    onDirectPlayClick = { movie ->
                         movie.serverLinks.firstOrNull()?.let { link ->
-                            navController.navigateToPlayer(link.serverName, link.fileId, movie.id, url)
+                            adsManager.showRewardedVideo(activity) {
+                                navController.navigateToPlayer(link.serverName, link.fileId, movie.id)
+                            }
                         }
                     }
                 )
@@ -169,8 +175,10 @@ fun MainContent(
                 DetailScreen(
                     viewModel = detailViewModel,
                     onBack = { navController.popBackStack() },
-                    onPlay = { server, fileId, videoUrl -> 
-                        navController.navigateToPlayer(server, fileId, movieId, videoUrl)
+                    onPlay = { server, fileId -> 
+                        adsManager.showRewardedVideo(activity) {
+                            navController.navigateToPlayer(server, fileId, movieId)
+                        }
                     }
                 )
             }
@@ -196,6 +204,7 @@ fun MainContent(
                 val playerViewModel: PlayerViewModel = hiltViewModel()
                 PlayerScreen(
                     viewModel = playerViewModel,
+                    adsManager = adsManager,
                     onBack = { navController.popBackStack() }
                 )
             }

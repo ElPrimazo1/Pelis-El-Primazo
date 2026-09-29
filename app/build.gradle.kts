@@ -23,14 +23,15 @@ android {
         applicationId = "com.example.peliselprimazo"
         minSdk = 24
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.2.1"
+        versionCode = 4
+        versionName = "2.1.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "STREAMTAPE_LOGIN", "\"${secrets["STREAMTAPE_LOGIN"] ?: ""}\"")
         buildConfigField("String", "STREAMTAPE_KEY", "\"${secrets["STREAMTAPE_KEY"] ?: ""}\"")
         buildConfigField("String", "TMDB_API_KEY", "\"${secrets["TMDB_API_KEY"] ?: ""}\"")
+        buildConfigField("String", "IRONSOURCE_APP_KEY", "\"${secrets["IRONSOURCE_APP_KEY"] ?: ""}\"")
     }
 
     buildTypes {
@@ -110,6 +111,11 @@ dependencies {
     implementation(libs.firebase.messaging)
     implementation(libs.firebase.config)
     implementation(libs.kotlinx.coroutines.play.services)
+
+    // Ads
+    implementation(libs.ironsource.sdk)
+    implementation(libs.ironsource.unityads)
+    implementation(libs.unity.ads)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

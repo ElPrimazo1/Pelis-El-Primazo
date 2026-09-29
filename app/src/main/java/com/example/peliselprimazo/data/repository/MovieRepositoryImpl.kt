@@ -25,16 +25,11 @@ import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.tasks.await
-import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 import java.net.HttpURLConnection
@@ -626,11 +621,16 @@ class MovieRepositoryImpl @Inject constructor(
     }
 
     override suspend fun register(username: String, email: String, password: String) {
-        withContext(Dispatchers.IO) {
+        // Ejecución rápida: Solo esperamos a Auth. El resto en segundo plano para no bloquear el flujo de la UI.
+        val result = firebaseAuth.createUserWithEmailAndPassword(email, password).await()
+        val firebaseUser = result.user ?: throw Exception("Error al crear usuario")
+        
+        // Emitimos el usuario inmediatamente para que la UI reaccione
+        _currentUser.value = User(username, email, null, true)
+        
+        // Actualizaciones secundarias en background (Firestore y Perfil)
+        CoroutineScope(Dispatchers.IO).launch {
             try {
-                val result = firebaseAuth.createUserWithEmailAndPassword(email, password).await()
-                val firebaseUser = result.user ?: throw Exception("Error al crear usuario")
-                
                 val profileUpdates = UserProfileChangeRequest.Builder()
                     .setDisplayName(username)
                     .build()
@@ -647,12 +647,8 @@ class MovieRepositoryImpl @Inject constructor(
                     "watching" to emptyMap<String, Any>()
                 )
                 firestore.collection("users").document(firebaseUser.uid).set(userData).await()
-                
-                _currentUser.value = User(username, email, null, true)
-                
             } catch (e: Exception) {
-                Log.e("Auth", "Registro fallido", e)
-                throw e
+                Log.e("AuthBackground", "Error en tareas secundarias de registro: ${e.message}")
             }
         }
     }

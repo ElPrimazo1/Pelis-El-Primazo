@@ -72,7 +72,7 @@ fun SplashScreen(onAnimationFinished: () -> Unit) {
             // El Logo es visible desde el primer frame (sin alpha animation)
             Image(
                 painter = painterResource(id = R.drawable.app_logo),
-                contentDescription = "Logo Pelis El Primazo",
+                contentDescription = "Logo CFilm",
                 modifier = Modifier
                     .size(280.dp)
                     .scale(scaleAnim.value)

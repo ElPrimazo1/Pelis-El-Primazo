@@ -26,15 +26,21 @@ class ConfigRepositoryImpl @Inject constructor(
             val updateUrl = remoteConfig.getString("update_url")
             val currentVersion = BuildConfig.VERSION_CODE
             
+            // CAPTURA TOTAL: Ahora toma cualquier parámetro que añadas en Firebase
+            val visualFlags = mutableMapOf<String, String>()
+            remoteConfig.all.forEach { (key, value) ->
+                visualFlags[key] = value.asString()
+            }
+            
             trySend(UpdateConfig(
                 latestVersionCode = latestVersion,
-                latestVersionName = latestName.ifBlank { "1.2.1" },
+                latestVersionName = latestName.ifBlank { "2.1.3" },
                 updateUrl = updateUrl,
-                isUpdateAvailable = latestVersion > currentVersion
+                isUpdateAvailable = latestVersion > currentVersion,
+                visualFlags = visualFlags
             ))
         }
 
-        // Initial emit
         emitUpdate()
 
         val registration = remoteConfig.addOnConfigUpdateListener(object : ConfigUpdateListener {
@@ -44,9 +50,7 @@ class ConfigRepositoryImpl @Inject constructor(
                 }
             }
 
-            override fun onError(error: FirebaseRemoteConfigException) {
-                // Ignore or log error
-            }
+            override fun onError(error: FirebaseRemoteConfigException) {}
         })
 
         awaitClose { registration.remove() }

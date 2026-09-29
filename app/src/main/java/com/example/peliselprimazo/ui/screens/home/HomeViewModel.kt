@@ -78,7 +78,7 @@ class HomeViewModel @Inject constructor(
     val trendingContent = repository.getTrends()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val adsSpots = adsManager.spots
+    val isRewardedVideoReady = adsManager.isRewardedVideoReady
 
     // Update Configuration
     val updateConfig = getUpdateConfigUseCase()
@@ -90,6 +90,10 @@ class HomeViewModel @Inject constructor(
 
     val seriesListFiltered = combine(allContent, _selectedGenre) { list, genre ->
         list.filter { it.contentType == ContentType.TV && (genre == null || it.genres.contains(genre)) }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val animeListFiltered = combine(allContent, _selectedGenre) { list, genre ->
+        list.filter { it.contentType == ContentType.ANIME && (genre == null || it.genres.contains(genre)) }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val searchResults = combine(allContent, _searchQuery) { list, query ->
@@ -112,6 +116,10 @@ class HomeViewModel @Inject constructor(
 
     val seriesSections = allContent.map { list ->
         createCategorySections(list.filter { it.contentType == ContentType.TV }, "Series")
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val animeSections = allContent.map { list ->
+        createCategorySections(list.filter { it.contentType == ContentType.ANIME }, "Anime")
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private fun createSections(list: List<Movie>, watching: List<Movie>, trends: List<Movie>): List<HomeSection> {
@@ -143,9 +151,8 @@ class HomeViewModel @Inject constructor(
     }
 
     init {
-        refreshData()
+        refreshData(isFirstLoad = true)
         syncConfig()
-        viewModelScope.launch { adsManager.loadAds() }
     }
 
     fun syncConfig() {
@@ -158,14 +165,21 @@ class HomeViewModel @Inject constructor(
         updateManager.downloadAndInstall(url)
     }
 
-    fun showInterstitial(activity: Activity, onAdDismissed: () -> Unit) {
-        adsManager.showInterstitialIfReady(activity, onAdDismissed)
+    fun showRewardedVideo(activity: Activity, placementName: String? = null, onReward: () -> Unit) {
+        adsManager.showRewardedVideo(activity, placementName, onReward)
     }
 
-    fun refreshData() {
+    fun launchTestSuite(activity: Activity) {
+        adsManager.launchTestSuite(activity)
+    }
+
+    fun refreshData(isFirstLoad: Boolean = false) {
         viewModelScope.launch {
-            if (allContent.value.isEmpty()) _isLoading.value = true
-            else _isRefreshing.value = true
+            if (isFirstLoad && allContent.value.isEmpty()) {
+                _isLoading.value = true
+            } else {
+                _isRefreshing.value = true
+            }
             try {
                 repository.refreshContent()
                 _error.value = null
@@ -213,6 +227,11 @@ class HomeViewModel @Inject constructor(
 
     fun updateAvatar(uri: String) { viewModelScope.launch { repository.updateAvatar(uri) } }
     
+    fun clearAuthStatus() {
+        _isLoadingAuth.value = false
+        _error.value = null
+    }
+
     fun register(u: String, e: String, p: String, onSuccess: () -> Unit) {
         viewModelScope.launch {
             _error.value = null

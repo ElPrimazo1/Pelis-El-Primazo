@@ -23,6 +23,8 @@ firebaseBom = "33.10.0"
 googleServices = "4.5.0"
 playServicesCast = "21.5.0"
 coroutinesPlayServices = "1.9.0"
+ironsource = "8.6.1"
+unityads = "4.12.5"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -83,6 +85,12 @@ firebase-analytics = { group = "com.google.firebase", name = "firebase-analytics
 firebase-messaging = { group = "com.google.firebase", name = "firebase-messaging" }
 firebase-config = { group = "com.google.firebase", name = "firebase-config" }
 kotlinx-coroutines-play-services = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-play-services", version.ref = "coroutinesPlayServices" }
+
+# Ads
+# Actualizado Unity Ads Adapter a 4.3.51 para compatibilidad con ironSource SDK 8.6+
+ironsource-sdk = { group = "com.ironsource.sdk", name = "mediationsdk", version.ref = "ironsource" }
+ironsource-unityads = { group = "com.ironsource.adapters", name = "unityadsadapter", version = "4.3.51" }
+unity-ads = { group = "com.unity3d.ads", name = "unity-ads", version.ref = "unityads" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

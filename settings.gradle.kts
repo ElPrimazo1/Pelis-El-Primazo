@@ -10,8 +10,9 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven { url = uri("https://android-sdk.is.com/") }
     }
 }
 
-rootProject.name = "Pelis El Primazo"
+rootProject.name = "CFilm"
 include(":app")

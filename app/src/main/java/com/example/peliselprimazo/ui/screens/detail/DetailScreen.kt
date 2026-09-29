@@ -43,7 +43,7 @@ import com.example.peliselprimazo.ui.components.ParticleLoading
 fun DetailScreen(
     viewModel: DetailViewModel,
     onBack: () -> Unit,
-    onPlay: (String, String, String?) -> Unit
+    onPlay: (String, String) -> Unit // Simplificado: solo necesitamos server y fileId
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val isPreloading by viewModel.preloadingVideo.collectAsState()
@@ -71,16 +71,6 @@ fun DetailScreen(
             pendingAction = action
             showAuthDialog = true
         }
-    }
-
-    val playVideo = { server: String, fileId: String ->
-        viewModel.prepareAndPlay(server, fileId) { videoUrl, _ ->
-            onPlay(server, fileId, videoUrl)
-        }
-    }
-
-    val handlePlayRequest = { server: String, fileId: String ->
-        playVideo(server, fileId)
     }
 
     Scaffold(
@@ -129,7 +119,7 @@ fun DetailScreen(
                                 val firstLink = state.movie.serverLinks.firstOrNull()
                                 if (firstLink != null) {
                                     handleActionWithAuth {
-                                        handlePlayRequest(firstLink.serverName, firstLink.fileId)
+                                        onPlay(firstLink.serverName, firstLink.fileId)
                                     }
                                 }
                             } else {
@@ -152,7 +142,7 @@ fun DetailScreen(
                                 movie = state.movie,
                                 onEpisodeSelected = { server, fileId ->
                                     showEpisodeSheet = false
-                                    handlePlayRequest(server, fileId)
+                                    onPlay(server, fileId)
                                 }
                             )
                         }
@@ -165,29 +155,15 @@ fun DetailScreen(
                 }
             }
 
-            // Overlay de carga
+            // Overlay de carga (ahora manejado por MainActivity si prefieres, o lo dejamos aquí para feedback visual)
             AnimatedVisibility(
                 visible = isPreloading,
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically(),
+                enter = fadeIn(),
+                exit = fadeOut(),
                 modifier = Modifier.zIndex(100f)
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        ParticleLoading(size = 200.dp)
-                        Spacer(modifier = Modifier.height(24.dp))
-                        Text(
-                            text = "Preparando contenido...",
-                            color = Color.White.copy(alpha = 0.7f),
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
+                Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.8f)), contentAlignment = Alignment.Center) {
+                    ParticleLoading(size = 150.dp)
                 }
             }
 

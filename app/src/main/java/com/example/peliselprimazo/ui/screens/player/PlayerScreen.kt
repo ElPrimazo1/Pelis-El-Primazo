@@ -2,67 +2,46 @@ package com.example.peliselprimazo.ui.screens.player
 
 import android.annotation.SuppressLint
 import android.app.Activity
-import android.content.Context
 import android.content.pm.ActivityInfo
-import android.media.AudioManager
-import android.util.Log
-import android.view.WindowManager
+import android.graphics.Bitmap
+import android.os.Handler
+import android.os.Looper
+import android.os.Message
+import android.view.View
+import android.view.ViewGroup
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.*
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Error
+import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.zIndex
-import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import androidx.media3.common.*
-import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DefaultHttpDataSource
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.ima.ImaAdsLoader
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
-import androidx.media3.ui.AspectRatioFrameLayout
-import androidx.media3.ui.PlayerView
-import com.example.peliselprimazo.domain.model.Movie
-import com.example.peliselprimazo.domain.model.ServerLink
+import com.example.peliselprimazo.data.AdsManager
 import com.example.peliselprimazo.ui.components.ParticleLoading
-import com.google.ads.interactivemedia.v3.api.ImaSdkFactory
-import kotlinx.coroutines.delay
 
-@OptIn(UnstableApi::class)
 @SuppressLint("SourceLockedOrientationActivity")
 @Composable
 fun PlayerScreen(
     viewModel: PlayerViewModel,
+    adsManager: AdsManager,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -77,7 +56,7 @@ fun PlayerScreen(
             controller.hide(WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.navigationBars())
             controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             view.keepScreenOn = true
         }
         
@@ -87,7 +66,7 @@ fun PlayerScreen(
                 val controller = WindowCompat.getInsetsController(window, view)
                 controller.show(WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.navigationBars())
                 act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 view.keepScreenOn = false
             }
         }
@@ -107,30 +86,23 @@ fun PlayerScreen(
             }
             is PlayerUiState.Success -> {
                 Box(modifier = Modifier.fillMaxSize()) {
-                    if (state.isEmbed) {
-                        WebPlayer(url = state.videoUrl)
-                    } else {
-                        VideoPlayerWithControls(
-                            state = state,
-                            onBack = onBack,
-                            onProgressUpdate = { pos, dur -> viewModel.updateProgress(pos, dur) },
-                            onNextEpisode = { next ->
-                                viewModel.loadVideo(next.serverName, next.fileId, state.movie.id)
-                            },
-                            onReportError = { 
-                                viewModel.reportError()
-                                Toast.makeText(context, "Error reportado", Toast.LENGTH_SHORT).show()
+                    WebPlayer(
+                        url = state.videoUrl, 
+                        onBack = onBack,
+                        onNext = state.nextLink?.let { next ->
+                            {
+                                activity?.let { act ->
+                                    adsManager.showRewardedVideo(act) {
+                                        viewModel.loadVideo(next.serverName, next.fileId, state.movie.id)
+                                    }
+                                } ?: viewModel.loadVideo(next.serverName, next.fileId, state.movie.id)
                             }
-                        )
-                    }
+                        }
+                    )
                     
-                    AnimatedVisibility(
-                        visible = state.isChangingEpisode,
-                        enter = fadeIn(),
-                        exit = fadeOut()
-                    ) {
+                    if (state.isChangingEpisode) {
                         Box(
-                            modifier = Modifier.fillMaxSize().background(Color.Black).zIndex(100f),
+                            modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.7f)),
                             contentAlignment = Alignment.Center
                         ) {
                             ParticleLoading(size = 200.dp)
@@ -149,515 +121,180 @@ fun PlayerScreen(
     }
 }
 
-@OptIn(UnstableApi::class)
-@Composable
-fun VideoPlayerWithControls(
-    state: PlayerUiState.Success,
-    onBack: () -> Unit,
-    onProgressUpdate: (Long, Long) -> Unit,
-    onNextEpisode: (ServerLink) -> Unit,
-    onReportError: () -> Unit
-) {
-    val context = LocalContext.current
-    val adUrl = state.adUrl
-
-    val adsLoader = remember(adUrl) {
-        if (!adUrl.isNullOrBlank()) {
-            val sdkFactory = ImaSdkFactory.getInstance()
-            val imaSdkSettings = sdkFactory.createImaSdkSettings().apply {
-                maxRedirects = 8
-                language = "es"
-            }
-            ImaAdsLoader.Builder(context)
-                .setImaSdkSettings(imaSdkSettings)
-                .build()
-        } else null
-    }
-
-    val playerView = remember {
-        PlayerView(context).apply {
-            useController = false
-            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-            setBackgroundColor(android.graphics.Color.BLACK)
-        }
-    }
-
-    var isAdActive by remember { mutableStateOf(false) }
-    var isPlaying by remember { mutableStateOf(false) }
-    var currentPosition by remember { mutableLongStateOf(0L) }
-    var duration by remember { mutableLongStateOf(0L) }
-    var isBuffering by remember { mutableStateOf(true) }
-    var hasStartedPlaying by remember(state.videoUrl) { mutableStateOf(false) }
-    var tracks by remember { mutableStateOf(Tracks.EMPTY) }
-    
-    var hasAutoPlayed by remember(state.videoUrl) { mutableStateOf(false) }
-
-    val exoPlayer = remember(state.videoUrl, adsLoader) {
-        val dataSourceFactory = DefaultHttpDataSource.Factory().apply {
-            setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        }
-        val mediaSourceFactory = DefaultMediaSourceFactory(context).setDataSourceFactory(dataSourceFactory)
-        
-        adsLoader?.let { loader -> 
-            mediaSourceFactory.setLocalAdInsertionComponents({ loader }, playerView) 
-        }
-
-        ExoPlayer.Builder(context)
-            .setMediaSourceFactory(mediaSourceFactory)
-            .build().apply {
-                adsLoader?.setPlayer(this)
-            }
-    }
-
-    LaunchedEffect(state.videoUrl, adUrl) {
-        val mediaItemBuilder = MediaItem.Builder().setUri(state.videoUrl.toUri())
-        if (state.videoUrl.contains(".m3u8") || state.videoUrl.contains("hls")) {
-            mediaItemBuilder.setMimeType(MimeTypes.APPLICATION_M3U8)
-        }
-        if (!adUrl.isNullOrBlank()) {
-            mediaItemBuilder.setAdsConfiguration(
-                MediaItem.AdsConfiguration.Builder(adUrl.toUri()).build()
-            )
-        }
-        exoPlayer.setMediaItem(mediaItemBuilder.build())
-        if (state.resumePosition > 0) exoPlayer.seekTo(state.resumePosition)
-        exoPlayer.prepare()
-        exoPlayer.playWhenReady = true
-    }
-
-    DisposableEffect(exoPlayer) {
-        val listener = object : Player.Listener {
-            override fun onIsPlayingChanged(playing: Boolean) { 
-                isPlaying = playing
-                isAdActive = exoPlayer.isPlayingAd
-                if (playing && !isAdActive) hasStartedPlaying = true
-            }
-            override fun onPlaybackStateChanged(s: Int) { 
-                isBuffering = s == Player.STATE_BUFFERING
-                isAdActive = exoPlayer.isPlayingAd || exoPlayer.currentAdGroupIndex != C.INDEX_UNSET
-                if (s == Player.STATE_READY) {
-                    duration = exoPlayer.duration
-                    if (!isAdActive) hasStartedPlaying = true
-                }
-                if (s == Player.STATE_ENDED && !hasAutoPlayed) {
-                    hasAutoPlayed = true
-                    state.nextLink?.let { onNextEpisode(it) }
-                }
-            }
-            override fun onPositionDiscontinuity(oldPos: Player.PositionInfo, newPos: Player.PositionInfo, reason: Int) {
-                isAdActive = exoPlayer.isPlayingAd || exoPlayer.currentAdGroupIndex != C.INDEX_UNSET
-            }
-            override fun onTracksChanged(newTracks: Tracks) { tracks = newTracks }
-        }
-        exoPlayer.addListener(listener)
-        onDispose { 
-            if (!exoPlayer.isPlayingAd) onProgressUpdate(exoPlayer.currentPosition, exoPlayer.duration)
-            exoPlayer.removeListener(listener)
-            adsLoader?.setPlayer(null)
-            exoPlayer.release()
-            adsLoader?.release()
-        }
-    }
-
-    LaunchedEffect(exoPlayer) {
-        while (true) {
-            isAdActive = exoPlayer.isPlayingAd || exoPlayer.currentAdGroupIndex != C.INDEX_UNSET
-            currentPosition = exoPlayer.currentPosition
-            duration = exoPlayer.duration
-            
-            if (!isAdActive && !hasAutoPlayed && duration > 0 && (duration - currentPosition) <= 2000) {
-                hasAutoPlayed = true
-                state.nextLink?.let { onNextEpisode(it) }
-            }
-            
-            delay(500)
-        }
-    }
-
-    Box(modifier = Modifier.fillMaxSize()) {
-        AndroidView(
-            factory = { playerView }, 
-            update = { pv -> if (pv.player != exoPlayer) pv.player = exoPlayer },
-            modifier = Modifier.fillMaxSize()
-        )
-        
-        if (!isAdActive) {
-            if (isBuffering || !hasStartedPlaying) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    ParticleLoading(size = 150.dp)
-                }
-            }
-
-            PlayerControls(
-                movie = state.movie,
-                currentLink = state.currentLink,
-                isPlaying = isPlaying,
-                currentPosition = currentPosition,
-                duration = duration,
-                onBack = onBack,
-                onPlayPause = { if (isPlaying) exoPlayer.pause() else exoPlayer.play() },
-                onSeek = { exoPlayer.seekTo(it) },
-                onNextEpisode = state.nextLink?.let { { hasAutoPlayed = true; onNextEpisode(it) } },
-                onReportError = onReportError,
-                tracks = tracks,
-                onAudioTrackSelected = { trackGroup, trackIndex ->
-                    exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
-                        .buildUpon()
-                        .addOverride(TrackSelectionOverride(trackGroup, trackIndex))
-                        .build()
-                },
-                onSubtitleTrackSelected = { trackGroup, trackIndex ->
-                    if (trackIndex == -1) {
-                        exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
-                            .buildUpon()
-                            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
-                            .build()
-                    } else {
-                        exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
-                            .buildUpon()
-                            .addOverride(TrackSelectionOverride(trackGroup, trackIndex))
-                            .build()
-                    }
-                },
-                onQualitySelected = { trackGroup, trackIndex ->
-                    exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
-                        .buildUpon()
-                        .addOverride(TrackSelectionOverride(trackGroup, trackIndex))
-                        .build()
-                },
-                exoPlayer = exoPlayer
-            )
-
-            val timeRemaining = duration - currentPosition
-            if (state.nextLink != null && duration > 0 && timeRemaining in 2001..20000) {
-                NextEpisodeOverlay(
-                    nextLink = state.nextLink,
-                    secondsRemaining = (timeRemaining / 1000).toInt(),
-                    onNext = { 
-                        hasAutoPlayed = true
-                        onNextEpisode(state.nextLink) 
-                    },
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 80.dp, end = 32.dp)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun NextEpisodeOverlay(
-    nextLink: ServerLink,
-    secondsRemaining: Int,
-    onNext: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        modifier = modifier
-            .width(220.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .clickable { onNext() },
-        color = Color.Black.copy(alpha = 0.8f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
-    ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(
-                    progress = { secondsRemaining / 20f },
-                    modifier = Modifier.size(40.dp),
-                    color = Color.Red,
-                    strokeWidth = 3.dp,
-                    trackColor = Color.White.copy(alpha = 0.1f)
-                )
-                Text(
-                    text = secondsRemaining.toString(),
-                    color = Color.White,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-            Spacer(Modifier.width(12.dp))
-            Column {
-                Text("SIGUIENTE", color = Color.Gray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                Text(
-                    "Episodio ${nextLink.episode}",
-                    color = Color.White,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Black,
-                    maxLines = 1
-                )
-            }
-        }
-    }
-}
-
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun WebPlayer(url: String) {
-    AndroidView(
-        factory = { context ->
-            WebView(context).apply {
-                settings.javaScriptEnabled = true
-                settings.domStorageEnabled = true
-                settings.mediaPlaybackRequiresUserGesture = false
-                webViewClient = WebViewClient()
-                webChromeClient = WebChromeClient()
-                loadUrl(url)
-            }
-        },
-        modifier = Modifier.fillMaxSize()
-    )
-}
-
-@OptIn(UnstableApi::class)
-@Composable
-fun PlayerControls(
-    movie: Movie,
-    currentLink: ServerLink?,
-    isPlaying: Boolean,
-    currentPosition: Long,
-    duration: Long,
+fun WebPlayer(
+    url: String, 
     onBack: () -> Unit,
-    onPlayPause: () -> Unit,
-    onSeek: (Long) -> Unit,
-    onNextEpisode: (() -> Unit)?,
-    onReportError: () -> Unit,
-    tracks: Tracks,
-    onAudioTrackSelected: (TrackGroup, Int) -> Unit,
-    onSubtitleTrackSelected: (TrackGroup, Int) -> Unit,
-    onQualitySelected: (TrackGroup, Int) -> Unit,
-    exoPlayer: ExoPlayer
+    onNext: (() -> Unit)? = null
 ) {
-    val context = LocalContext.current
-    val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
-    
-    var isVisible by remember { mutableStateOf(true) }
-    var isLocked by remember { mutableStateOf(false) }
-    var showSettings by remember { mutableStateOf(false) }
-    
-    var brightness by remember { mutableStateOf(0.7f) }
-    var volume by remember { mutableStateOf(audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() / audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)) }
-
-    LaunchedEffect(isVisible) {
-        if (isVisible && !isLocked) {
-            delay(5000)
-            isVisible = false
-        }
-    }
+    var isWebViewLoading by remember { mutableStateOf(true) }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .pointerInput(Unit) {
-                detectTapGestures(
-                    onTap = { isVisible = !isVisible },
-                    onDoubleTap = { offset ->
-                        if (!isLocked) {
-                            if (offset.x < size.width / 2) onSeek((currentPosition - 10000).coerceAtLeast(0))
-                            else onSeek((currentPosition + 10000).coerceAtMost(duration))
-                        }
-                    }
-                )
-            }
-            .pointerInput(Unit) {
-                detectDragGestures { change, dragAmount ->
-                    if (!isLocked) {
-                        if (change.position.x < size.width / 2) {
-                            brightness = (brightness - dragAmount.y / size.height).coerceIn(0f, 1f)
-                            val act = context as? Activity
-                            val lp = act?.window?.attributes
-                            lp?.screenBrightness = brightness
-                            act?.window?.attributes = lp
-                        } else {
-                            volume = (volume - dragAmount.y / size.height).coerceIn(0f, 1f)
-                            audioManager.setStreamVolume(
-                                AudioManager.STREAM_MUSIC,
-                                (volume * audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)).toInt(),
-                                0
-                            )
-                        }
-                    }
-                }
-            }
+            .background(Color.Black)
     ) {
-        AnimatedVisibility(visible = isVisible, enter = fadeIn(), exit = fadeOut()) {
-            Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f))) {
-                
-                IconButton(
-                    onClick = { isLocked = !isLocked },
-                    modifier = Modifier.align(Alignment.CenterStart).padding(24.dp)
-                ) {
-                    Icon(
-                        if (isLocked) Icons.Rounded.Lock else Icons.Rounded.LockOpen,
-                        null, tint = Color.White, modifier = Modifier.size(32.dp)
+        AndroidView(
+            factory = { context ->
+                WebView(context).apply {
+                    visibility = View.INVISIBLE
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
                     )
-                }
-
-                if (!isLocked) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter).padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(onClick = onBack) { Icon(Icons.Rounded.ArrowBack, null, tint = Color.White) }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(movie.title, color = Color.White, fontWeight = FontWeight.Black, fontSize = 18.sp)
-                            if (currentLink?.episode != null) {
-                                Text("Temporada ${currentLink.season} • Episodio ${currentLink.episode}", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
-                            }
-                        }
-                        IconButton(onClick = { showSettings = true }) { Icon(Icons.Rounded.Settings, null, tint = Color.White) }
-                        IconButton(onClick = onReportError) { Icon(Icons.Rounded.BugReport, null, tint = Color.White) }
-                    }
-
-                    Row(modifier = Modifier.align(Alignment.Center), verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = { onSeek((currentPosition - 10000).coerceAtLeast(0)) }) {
-                            Icon(Icons.Rounded.Replay10, null, tint = Color.White, modifier = Modifier.size(56.dp))
-                        }
-                        Spacer(modifier = Modifier.width(48.dp))
-                        IconButton(onClick = onPlayPause) {
-                            Icon(
-                                if (isPlaying) Icons.Rounded.PauseCircleFilled else Icons.Rounded.PlayCircleFilled,
-                                null, tint = Color.White, modifier = Modifier.size(92.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(48.dp))
-                        IconButton(onClick = { onSeek((currentPosition + 10000).coerceAtMost(duration)) }) {
-                            Icon(Icons.Rounded.Forward10, null, tint = Color.White, modifier = Modifier.size(56.dp))
-                        }
-                    }
-
-                    Column(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(formatTime(currentPosition), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            Slider(
-                                value = if (duration > 0) currentPosition.toFloat() / duration else 0f,
-                                onValueChange = { onSeek((it * duration).toLong()) },
-                                modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
-                                colors = SliderDefaults.colors(thumbColor = Color.Red, activeTrackColor = Color.Red)
-                            )
-                            Text(formatTime(duration), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
+                    
+                    settings.apply {
+                        javaScriptEnabled = true
+                        domStorageEnabled = true
+                        databaseEnabled = true
                         
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                TextButton(onClick = {
-                                    val currentSpeed = exoPlayer.playbackParameters.speed
-                                    val nextSpeed = when {
-                                        currentSpeed < 1f -> 1.0f
-                                        currentSpeed < 1.5f -> 1.5f
-                                        currentSpeed < 2f -> 2.0f
-                                        else -> 0.5f
-                                    }
-                                    exoPlayer.setPlaybackSpeed(nextSpeed)
-                                }) {
-                                    Icon(Icons.Rounded.Speed, null, tint = Color.White, modifier = Modifier.size(18.dp))
-                                    Spacer(Modifier.width(4.dp))
-                                    Text("${exoPlayer.playbackParameters.speed}x", color = Color.White, fontWeight = FontWeight.Bold)
-                                }
+                        // Configuración para el control de ventanas
+                        setSupportMultipleWindows(true) 
+                        javaScriptCanOpenWindowsAutomatically = false
+                        mediaPlaybackRequiresUserGesture = false
+                    }
+
+                    webViewClient = object : WebViewClient() {
+                        override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                            super.onPageStarted(view, url, favicon)
+                            isWebViewLoading = true
+                            view?.visibility = View.INVISIBLE
+                        }
+
+                        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                            val uri = request?.url ?: return true
+                            val urlString = uri.toString()
+                            
+                            // 1. Bloqueo de esquemas no estándar (publicidad que intenta abrir apps)
+                            if (uri.scheme != "http" && uri.scheme != "https") return true
+                            
+                            // 2. Control de navegación: Solo permitir Streamtape y sus recursos
+                            val allowedHosts = listOf("streamtape.com", "streamtape.to", "tapecontent.net")
+                            val isAllowedHost = allowedHosts.any { uri.host?.contains(it) == true }
+                            
+                            // Recursos necesarios para la carga del reproductor
+                            val isResource = urlString.contains("static") || 
+                                            urlString.contains("video") || 
+                                            urlString.contains(".mp4")
+                            
+                            // Si no es un host permitido ni un recurso, bloqueamos (true)
+                            return !(isAllowedHost || isResource)
+                        }
+
+                        override fun shouldInterceptRequest(
+                            view: WebView?,
+                            request: WebResourceRequest?
+                        ): WebResourceResponse? {
+                            val requestUrl = request?.url?.toString()?.lowercase() ?: return null
+                            
+                            // Lista de dominios y patrones conocidos de redes publicitarias
+                            val adDomains = listOf(
+                                "doubleclick.net", "googlesyndication.com", "googleadservices.com",
+                                "popads.net", "adnxs.com", "adsystem.com", "adservice.google",
+                                "onclickads.net", "taboola.com", "outbrain.com", "histats.com",
+                                "a.bestcontent", "traffichunt.com", "juicyads.com", "exoclick.com",
+                                "propellerads.com", "yandex.ru", "google-analytics.com",
+                                "scorecardresearch.com", "quantserve.com", "ad-delivery",
+                                "mads.amazon", "serving-sys.com", "flashtalking.com", "casalemedia.com"
+                            )
+
+                            // Si la URL coincide con algún patrón publicitario, interceptamos y devolvemos una respuesta vacía
+                            if (adDomains.any { requestUrl.contains(it) }) {
+                                return WebResourceResponse("text/plain", "UTF-8", null)
                             }
 
-                            if (onNextEpisode != null) {
-                                Button(
-                                    onClick = { onNextEpisode() },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.15f)),
-                                    shape = RoundedCornerShape(8.dp)
-                                ) {
-                                    Icon(Icons.Rounded.SkipNext, null, tint = Color.White)
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("Siguiente", color = Color.White)
-                                }
+                            return super.shouldInterceptRequest(view, request)
+                        }
+
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            super.onPageFinished(view, url)
+                            
+                            // Inyección de script JS para detectar y ocultar divs superpuestos (overlays/popups)
+                            val jsCode = """
+                                (function() {
+                                    function hideAds() {
+                                        var elements = document.getElementsByTagName('*');
+                                        for (var i = 0; i < elements.length; i++) {
+                                            var el = elements[i];
+                                            var style = window.getComputedStyle(el);
+                                            
+                                            if (style.position === 'fixed' || style.position === 'absolute') {
+                                                var zIndex = parseInt(style.zIndex);
+                                                if (zIndex > 100 || el.id === 'popads' || el.className.indexOf('popup') !== -1) {
+                                                    if (!el.contains(document.querySelector('video'))) {
+                                                        el.style.display = 'none';
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    hideAds();
+                                    setInterval(hideAds, 1000);
+                                })();
+                            """.trimIndent()
+                            
+                            view?.evaluateJavascript(jsCode) {
+                                // Implementación del Handler para retrasar la visibilidad 500ms
+                                Handler(Looper.getMainLooper()).postDelayed({
+                                    view.visibility = View.VISIBLE
+                                    isWebViewLoading = false
+                                }, 500)
                             }
                         }
                     }
+
+                    webChromeClient = object : WebChromeClient() {
+                        override fun onCreateWindow(
+                            view: WebView?,
+                            isDialog: Boolean,
+                            isUserGesture: Boolean,
+                            resultMsg: Message?
+                        ): Boolean {
+                            return false
+                        }
+                    }
                 }
+            },
+            update = { webView ->
+                if (webView.url != url) {
+                    webView.loadUrl(url)
+                }
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+
+        if (isWebViewLoading) {
+            Box(
+                modifier = Modifier.fillMaxSize().background(Color.Black),
+                contentAlignment = Alignment.Center
+            ) {
+                ParticleLoading(size = 150.dp)
             }
         }
-        
-        if (showSettings) {
-            TrackSelectionDialog(
-                tracks = tracks,
-                onDismiss = { showSettings = false },
-                onAudioSelected = onAudioTrackSelected,
-                onSubtitleSelected = onSubtitleTrackSelected,
-                onQualitySelected = onQualitySelected
-            )
+
+        IconButton(
+            onClick = onBack,
+            modifier = Modifier
+                .padding(16.dp)
+                .align(Alignment.TopStart)
+                .size(44.dp)
+                .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+        ) { 
+            Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Volver", tint = Color.White) 
+        }
+
+        if (onNext != null) {
+            IconButton(
+                onClick = onNext,
+                modifier = Modifier
+                    .padding(16.dp)
+                    .align(Alignment.TopEnd)
+                    .size(44.dp)
+                    .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+            ) { 
+                Icon(Icons.Rounded.SkipNext, "Siguiente", tint = Color.White) 
+            }
         }
     }
-}
-
-@Composable
-fun TrackSelectionDialog(
-    tracks: Tracks,
-    onDismiss: () -> Unit,
-    onAudioSelected: (TrackGroup, Int) -> Unit,
-    onSubtitleSelected: (TrackGroup, Int) -> Unit,
-    onQualitySelected: (TrackGroup, Int) -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = Color(0xFF1A1A1A),
-        title = { Text("Ajustes", color = Color.White, fontWeight = FontWeight.Black) },
-        text = {
-            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                Text("Calidad", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                tracks.groups.filter { it.type == C.TRACK_TYPE_VIDEO }.forEach { group ->
-                    for (i in 0 until group.length) {
-                        val isSelected = group.isTrackSelected(i)
-                        val format = group.getTrackFormat(i)
-                        ListItem(
-                            headlineContent = { Text("${format.height}p", color = Color.White) },
-                            modifier = Modifier.clickable { onQualitySelected(group.mediaTrackGroup, i); onDismiss() },
-                            trailingContent = { if (isSelected) Icon(Icons.Rounded.Check, null, tint = Color.Red) },
-                            colors = ListItemDefaults.colors(containerColor = Color.Transparent)
-                        )
-                    }
-                }
-                Spacer(Modifier.height(16.dp))
-                Text("Audio", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }.forEach { group ->
-                    for (i in 0 until group.length) {
-                        val isSelected = group.isTrackSelected(i)
-                        val format = group.getTrackFormat(i)
-                        ListItem(
-                            headlineContent = { Text(format.language?.uppercase() ?: "Audio ${i+1}", color = Color.White) },
-                            modifier = Modifier.clickable { onAudioSelected(group.mediaTrackGroup, i); onDismiss() },
-                            trailingContent = { if (isSelected) Icon(Icons.Rounded.Check, null, tint = Color.Red) },
-                            colors = ListItemDefaults.colors(containerColor = Color.Transparent)
-                        )
-                    }
-                }
-                Spacer(Modifier.height(16.dp))
-                Text("Subtítulos", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                ListItem(
-                    headlineContent = { Text("Desactivados", color = Color.White) },
-                    modifier = Modifier.clickable { onSubtitleSelected(TrackGroup(Format.Builder().build()), -1); onDismiss() },
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent)
-                )
-                tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }.forEach { group ->
-                    for (i in 0 until group.length) {
-                        val isSelected = group.isTrackSelected(i)
-                        val format = group.getTrackFormat(i)
-                        ListItem(
-                            headlineContent = { Text(format.language?.uppercase() ?: "Idioma ${i+1}", color = Color.White) },
-                            modifier = Modifier.clickable { onSubtitleSelected(group.mediaTrackGroup, i); onDismiss() },
-                            trailingContent = { if (isSelected) Icon(Icons.Rounded.Check, null, tint = Color.Red) },
-                            colors = ListItemDefaults.colors(containerColor = Color.Transparent)
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Cerrar", color = Color.Red) } }
-    )
-}
-
-private fun formatTime(ms: Long): String {
-    val totalSecs = ms / 1000
-    val hours = totalSecs / 3600
-    val mins = (totalSecs % 3600) / 60
-    val secs = totalSecs % 60
-    return if (hours > 0) String.format("%d:%02d:%02d", hours, mins, secs)
-    else String.format("%02d:%02d", mins, secs)
 }
