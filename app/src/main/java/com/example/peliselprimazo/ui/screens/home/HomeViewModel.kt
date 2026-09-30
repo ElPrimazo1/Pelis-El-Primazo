@@ -84,6 +84,9 @@ class HomeViewModel @Inject constructor(
     val updateConfig = getUpdateConfigUseCase()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
+    val isDownloading = updateManager.isDownloading
+    val downloadProgress = updateManager.downloadProgress
+
     val moviesListFiltered = combine(allContent, _selectedGenre) { list, genre ->
         list.filter { it.contentType == ContentType.MOVIE && (genre == null || it.genres.contains(genre)) }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())

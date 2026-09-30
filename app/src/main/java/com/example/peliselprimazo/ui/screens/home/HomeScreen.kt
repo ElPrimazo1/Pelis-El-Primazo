@@ -46,6 +46,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import coil.request.CachePolicy
@@ -97,6 +98,9 @@ fun HomeScreen(
     val totalHours by viewModel.totalHours.collectAsState()
     
     val updateConfig by viewModel.updateConfig.collectAsState()
+    
+    val isDownloading by viewModel.isDownloading.collectAsState()
+    val downloadProgress by viewModel.downloadProgress.collectAsState()
 
     val coroutineScope = rememberCoroutineScope()
     var showAuthDialog by remember { mutableStateOf(false) }
@@ -360,14 +364,71 @@ fun HomeScreen(
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showUpdateDialog = false }) {
-                        Text("Más tarde", color = Color.Gray)
+                    if (updateConfig?.isForceUpdate == false) {
+                        TextButton(onClick = { showUpdateDialog = false }) {
+                            Text("Más tarde", color = Color.Gray)
+                        }
                     }
                 },
                 containerColor = Color(0xFF1A1A1A),
                 titleContentColor = Color.White,
                 textContentColor = Color.LightGray
             )
+        }
+
+        // Blocking Update Progress Dialog
+        if (isDownloading) {
+            Dialog(
+                onDismissRequest = { },
+                properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false)
+            ) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    color = Color(0xFF1A1A1A),
+                    shape = RoundedCornerShape(24.dp),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        ParticleLoading(size = 120.dp)
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Text(
+                            text = "Actualizando CFilm",
+                            color = Color.White,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Black
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Por favor, espera mientras se descarga la nueva versión. La aplicación se instalará automáticamente al finalizar.",
+                            color = Color.Gray,
+                            textAlign = TextAlign.Center,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Spacer(modifier = Modifier.height(32.dp))
+                        
+                        Box(contentAlignment = Alignment.Center) {
+                            LinearProgressIndicator(
+                                progress = { downloadProgress },
+                                modifier = Modifier.fillMaxWidth().height(12.dp).clip(CircleShape),
+                                color = MaterialTheme.colorScheme.primary,
+                                trackColor = Color.White.copy(alpha = 0.1f),
+                            )
+                        }
+                        
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        Text(
+                            text = "${(downloadProgress * 100).toInt()}%",
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                    }
+                }
+            }
         }
     }
 }

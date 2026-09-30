@@ -24,9 +24,9 @@ class ConfigRepositoryImpl @Inject constructor(
             val latestVersion = remoteConfig.getLong("latest_version_code").toInt()
             val latestName = remoteConfig.getString("latest_version_name")
             val updateUrl = remoteConfig.getString("update_url")
+            val isForce = remoteConfig.getBoolean("is_force_update")
             val currentVersion = BuildConfig.VERSION_CODE
             
-            // CAPTURA TOTAL: Ahora toma cualquier parámetro que añadas en Firebase
             val visualFlags = mutableMapOf<String, String>()
             remoteConfig.all.forEach { (key, value) ->
                 visualFlags[key] = value.asString()
@@ -34,9 +34,10 @@ class ConfigRepositoryImpl @Inject constructor(
             
             trySend(UpdateConfig(
                 latestVersionCode = latestVersion,
-                latestVersionName = latestName.ifBlank { "2.1.3" },
+                latestVersionName = latestName.ifBlank { "2.1.5" },
                 updateUrl = updateUrl,
                 isUpdateAvailable = latestVersion > currentVersion,
+                isForceUpdate = isForce,
                 visualFlags = visualFlags
             ))
         }
