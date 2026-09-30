@@ -5,17 +5,17 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.peliselprimazo.data.AdsManager
+import com.example.peliselprimazo.data.extractor.ExtractionResult
 import com.example.peliselprimazo.data.extractor.StreamExtractorFactory
 import com.example.peliselprimazo.domain.model.Movie
 import com.example.peliselprimazo.domain.model.ServerLink
+import com.example.peliselprimazo.domain.model.Subtitle
 import com.example.peliselprimazo.domain.repository.MovieRepository
-import com.example.peliselprimazo.domain.usecase.GetUpdateConfigUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -28,9 +28,11 @@ sealed class PlayerUiState {
         val movie: Movie,
         val currentLink: ServerLink? = null,
         val nextLink: ServerLink? = null,
+        val previousLink: ServerLink? = null,
         val videoUrl: String,
         val adUrl: String? = null,
         val headers: Map<String, String> = emptyMap(),
+        val subtitles: List<Subtitle> = emptyList(),
         val serverName: String = "",
         val resumePosition: Long = 0L,
         val isChangingEpisode: Boolean = false
@@ -43,7 +45,6 @@ class PlayerViewModel @Inject constructor(
     private val repository: MovieRepository,
     private val extractorFactory: StreamExtractorFactory,
     private val adsManager: AdsManager,
-    private val getUpdateConfigUseCase: GetUpdateConfigUseCase,
     private val okHttpClient: OkHttpClient,
     private val savedStateHandle: SavedStateHandle
 ) : ViewModel() {
@@ -106,32 +107,34 @@ class PlayerViewModel @Inject constructor(
                     return@launch
                 }
 
-                // Extracción en hilo secundario con User-Agent de navegador
                 val extractor = extractorFactory.getExtractor(serverName)
-                val (extractedUrl, extractedHeaders) = withContext(Dispatchers.IO) {
+                val extractionResult: ExtractionResult = withContext(Dispatchers.IO) {
                     if (!preloadedUrl.isNullOrBlank()) {
-                        preloadedUrl to extractor.getHeaders()
+                        ExtractionResult(preloadedUrl, extractor.getHeaders(), emptyList<Subtitle>())
                     } else {
                         extractor.extract(fileId, repository)
                     }
                 }
 
-                if (!extractedUrl.isNullOrBlank()) {
-                    // Ping Keep-Alive asíncrono
+                val videoUrlResult = extractionResult.videoUrl
+                if (!videoUrlResult.isNullOrBlank()) {
                     if (serverName.lowercase().contains("streamtape")) {
                         pingStreamtape(fileId)
                     }
 
                     val currentLink = movie.serverLinks.find { it.fileId == fileId }
                     val nextLink = findNextEpisode(movie, currentLink)
+                    val previousLink = findPreviousEpisode(movie, currentLink)
 
                     _uiState.value = PlayerUiState.Success(
                         movie = movie,
                         currentLink = currentLink,
                         nextLink = nextLink,
-                        videoUrl = extractedUrl,
+                        previousLink = previousLink,
+                        videoUrl = videoUrlResult,
                         adUrl = preloadedAdUrl ?: adsManager.getPlayerAdUrl(),
-                        headers = extractedHeaders,
+                        headers = extractionResult.headers,
+                        subtitles = if (extractionResult.subtitles.isNotEmpty()) extractionResult.subtitles else movie.subtitles,
                         serverName = serverName,
                         resumePosition = if (currentState is PlayerUiState.Success) 0L else movie.lastPosition,
                         isChangingEpisode = false
@@ -141,7 +144,7 @@ class PlayerViewModel @Inject constructor(
                         repository.addToWatching(movie.id)
                     }
                 } else {
-                    _uiState.value = PlayerUiState.Error("No se pudo extraer el enlace directo (Token expirado o error de servidor).")
+                    _uiState.value = PlayerUiState.Error("No se pudo extraer el enlace directo.")
                 }
             } catch (e: Exception) {
                 Log.e(tag, "Error en flujo: ${e.message}")
@@ -165,8 +168,14 @@ class PlayerViewModel @Inject constructor(
     }
 
     private fun findNextEpisode(movie: Movie, current: ServerLink?): ServerLink? {
-        if (current == null || current.episode == null) return null
-        return movie.serverLinks.find { it.season == current.season && it.episode == (current.episode!! + 1) }
+        val currentEpisode = current?.episode ?: return null
+        return movie.serverLinks.find { it.season == current.season && it.episode == currentEpisode + 1 }
+    }
+
+    private fun findPreviousEpisode(movie: Movie, current: ServerLink?): ServerLink? {
+        val currentEpisode = current?.episode ?: return null
+        if (currentEpisode <= 1) return null
+        return movie.serverLinks.find { it.season == current.season && it.episode == currentEpisode - 1 }
     }
 
     fun updateProgress(position: Long, duration: Long) {

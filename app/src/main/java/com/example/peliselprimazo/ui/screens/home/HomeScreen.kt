@@ -7,7 +7,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -39,7 +38,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -51,12 +49,10 @@ import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import coil.request.CachePolicy
 import coil.request.ImageRequest
-import com.example.peliselprimazo.R
 import com.example.peliselprimazo.domain.model.Movie
 import com.example.peliselprimazo.domain.model.User
 import com.example.peliselprimazo.ui.components.AuthDialog
 import com.example.peliselprimazo.ui.components.ParticleLoading
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -68,7 +64,6 @@ fun HomeScreen(
     onDirectPlayClick: (Movie) -> Unit
 ) {
     val context = LocalContext.current
-    val activity = context as Activity
     val isLoading by viewModel.isLoading.collectAsState()
     val isLoadingAuth by viewModel.isLoadingAuth.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
@@ -98,52 +93,33 @@ fun HomeScreen(
     val totalHours by viewModel.totalHours.collectAsState()
     
     val updateConfig by viewModel.updateConfig.collectAsState()
-    
-    val isDownloading by viewModel.isDownloading.collectAsState()
     val downloadProgress by viewModel.downloadProgress.collectAsState()
+    val isDownloading by viewModel.isDownloading.collectAsState()
 
     val coroutineScope = rememberCoroutineScope()
     var showAuthDialog by remember { mutableStateOf(false) }
     var pendingMovieToPlay by remember { mutableStateOf<Movie?>(null) }
     var showUpdateDialog by rememberSaveable { mutableStateOf(true) }
 
-    // DETALLES DINÁMICOS
     val appTitle = updateConfig?.visualFlags?.get("ui_app_title") ?: "CFilm"
-    val homeAnnouncement = updateConfig?.visualFlags?.get("ui_home_announcement")
     val loadingText = updateConfig?.visualFlags?.get("ui_loading_text") ?: "Preparando el cine..."
     val cambiosStatus = updateConfig?.visualFlags?.get("Cambios") ?: ""
 
-    LaunchedEffect(user?.isLoggedIn) {
-        if (user?.isLoggedIn == true && pendingMovieToPlay != null) {
-            val movie = pendingMovieToPlay!!
-            pendingMovieToPlay = null
-            showAuthDialog = false
-            delay(300)
-            onDirectPlayClick(movie)
-        }
-    }
-
-    val categories = listOf(
-        "all" to "Inicio",
-        "movie" to "Películas",
-        "series" to "Series",
-        "anime" to "Anime",
-        "profile" to "Perfil"
-    )
-
+    val categories = remember { listOf("Inicio", "Películas", "Series", "Anime", "Perfil") }
     val pagerState = rememberPagerState(initialPage = 0) { categories.size }
 
-    val handlePlayRequest = { movie: Movie ->
-        if (user?.isLoggedIn == true) {
-            onDirectPlayClick(movie)
-        } else {
-            pendingMovieToPlay = movie
-            showAuthDialog = true
+    val handlePlayRequest = remember(user?.isLoggedIn) {
+        { movie: Movie ->
+            if (user?.isLoggedIn == true) {
+                onDirectPlayClick(movie)
+            } else {
+                pendingMovieToPlay = movie
+                showAuthDialog = true
+            }
         }
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        
         PullToRefreshBox(
             isRefreshing = isRefreshing,
             onRefresh = { viewModel.refreshData() },
@@ -164,267 +140,150 @@ fun HomeScreen(
                     HorizontalPager(
                         state = pagerState,
                         modifier = Modifier.fillMaxSize(),
-                        userScrollEnabled = true,
                         beyondViewportPageCount = 1
                     ) { page ->
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            when (page) {
-                                0 -> HomeSectionsContent(homeSections, onMovieClick, handlePlayRequest, homeAnnouncement)
-                                1 -> CategoryTabContent(movieSections, moviesListFiltered, selectedGenre, onMovieClick)
-                                2 -> CategoryTabContent(seriesSections, seriesListFiltered, selectedGenre, onMovieClick)
-                                3 -> CategoryTabContent(animeSections, animeListFiltered, selectedGenre, onMovieClick)
-                                4 -> ProfileScreenContent(
-                                    user = user,
-                                    watching = watchingContent,
-                                    saved = savedContent,
-                                    liked = likedContent,
-                                    watchLater = watchLaterContent,
-                                    finished = finishedContent,
-                                    totalHours = totalHours,
-                                    viewModel = viewModel,
-                                    onMovieClick = onMovieClick,
-                                    onDirectPlayClick = handlePlayRequest,
-                                    cambiosStatus = cambiosStatus 
-                                )
-                            }
+                        when (page) {
+                            0 -> HomeSectionsContent(homeSections, onMovieClick, handlePlayRequest)
+                            1 -> CategoryTabContent(movieSections, moviesListFiltered, selectedGenre, onMovieClick)
+                            2 -> CategoryTabContent(seriesSections, seriesListFiltered, selectedGenre, onMovieClick)
+                            3 -> CategoryTabContent(animeSections, animeListFiltered, selectedGenre, onMovieClick)
+                            4 -> ProfileScreenContent(
+                                user = user,
+                                watching = watchingContent,
+                                saved = savedContent,
+                                liked = likedContent,
+                                watchLater = watchLaterContent,
+                                finished = finishedContent,
+                                totalHours = totalHours,
+                                viewModel = viewModel,
+                                onMovieClick = onMovieClick,
+                                cambiosStatus = cambiosStatus 
+                            )
                         }
                     }
                 }
             }
         }
 
-        // Top bar
         if (!isSearchActive) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(start = 12.dp, end = 12.dp, top = 0.dp)
-                    .zIndex(5f),
-                contentAlignment = Alignment.TopCenter
-            ) {
-                if (isLoading || isRefreshing) {
-                    ParticleLoading(modifier = Modifier.size(60.dp).offset(y = (-15).dp))
-                }
-
-                Surface(
-                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(bottomStart = 25.dp, bottomEnd = 25.dp)), 
-                    color = Color.Black.copy(alpha = 0.75f),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f))
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = appTitle,
-                                color = MaterialTheme.colorScheme.primary,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Black,
-                                letterSpacing = 0.5.sp
-                            )
-                        }
-                        IconButton(onClick = { viewModel.onSearchActiveChange(true) }) {
-                            Icon(Icons.Default.Search, contentDescription = "Buscar", tint = Color.White)
-                        }
-                    }
-                }
-            }
+            HomeTopBar(appTitle, isLoading || isRefreshing, onSearchClick = { viewModel.onSearchActiveChange(true) })
         } else {
-            Box(modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(start = 12.dp, end = 12.dp, top = 0.dp).zIndex(5f)) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(25.dp)),
-                    color = Color.Black.copy(alpha = 0.9f),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
-                ) {
-                    TextField(
-                        value = searchQuery,
-                        onValueChange = { viewModel.onSearchQueryChange(it) },
-                        modifier = Modifier.fillMaxWidth().height(56.dp),
-                        placeholder = { Text("¿Qué quieres ver hoy?", color = Color.Gray) },
-                        colors = TextFieldDefaults.colors(
-                            focusedContainerColor = Color.Transparent,
-                            unfocusedContainerColor = Color.Transparent,
-                            focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent,
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
-                        ),
-                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color.Gray) },
-                        trailingIcon = {
-                            IconButton(onClick = { viewModel.onSearchActiveChange(false) }) {
-                                Icon(Icons.Default.Close, contentDescription = null, tint = Color.White)
-                            }
-                        },
-                        singleLine = true
-                    )
-                }
-            }
+            SearchTopBar(searchQuery, onQueryChange = { viewModel.onSearchQueryChange(it) }, onClose = { viewModel.onSearchActiveChange(false) })
         }
 
-        // Overlay central para pre-extracción de video
-        AnimatedVisibility(
-            visible = isPreloading,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.zIndex(100f)
-        ) {
-            Box(modifier = Modifier.fillMaxSize().background(Color.Black).clickable(enabled = false) {}, contentAlignment = Alignment.Center) {
+        AnimatedVisibility(visible = isPreloading, enter = fadeIn(), exit = fadeOut()) {
+            Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.8f)).zIndex(100f), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    ParticleLoading(size = 200.dp)
-                    Spacer(modifier = Modifier.height(24.dp))
-                    Text(
-                        loadingText,
-                        color = Color.White.copy(alpha = 0.7f),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
+                    ParticleLoading(size = 150.dp)
+                    Text(loadingText, color = Color.White.copy(alpha = 0.7f), fontWeight = FontWeight.Bold)
                 }
             }
         }
 
-        // BARRA INFERIOR (Bottom navigation)
         if (!isSearchActive) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(bottom = 20.dp)
-                    .zIndex(10f), 
-                contentAlignment = Alignment.Center
-            ) {
-                Surface(
-                    modifier = Modifier
-                        .padding(horizontal = 12.dp)
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(30.dp)),
-                    color = Color(0xFF121212).copy(alpha = 0.95f),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
-                    tonalElevation = 8.dp
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        categories.forEachIndexed { index, pair ->
-                            CategoryBubbleItem(
-                                label = pair.second,
-                                selected = pagerState.currentPage == index,
-                                onClick = {
-                                    coroutineScope.launch {
-                                        pagerState.animateScrollToPage(index)
-                                    }
-                                }
-                            )
-                        }
-                    }
-                }
-            }
+            BottomNavBar(
+                modifier = Modifier.align(Alignment.BottomCenter),
+                categories = categories,
+                currentPage = pagerState.currentPage,
+                onPageSelected = { index -> coroutineScope.launch { pagerState.animateScrollToPage(index) } }
+            )
         }
 
         if (showAuthDialog) {
             AuthDialog(
                 isLoading = isLoadingAuth,
                 error = error,
-                onLogin = { e, p -> viewModel.login(e, p) { } },
-                onRegister = { u, e, p -> viewModel.register(u, e, p) { } },
-                onDismiss = { 
-                    showAuthDialog = false 
-                    pendingMovieToPlay = null
-                }
+                onLogin = { e, p -> 
+                    viewModel.login(e, p) { 
+                        showAuthDialog = false
+                        pendingMovieToPlay?.let { onDirectPlayClick(it) }
+                        pendingMovieToPlay = null 
+                    } 
+                },
+                onRegister = { u, e, p -> 
+                    viewModel.register(u, e, p) { 
+                        showAuthDialog = false
+                        pendingMovieToPlay?.let { onDirectPlayClick(it) }
+                        pendingMovieToPlay = null 
+                    } 
+                },
+                onDismiss = { showAuthDialog = false; pendingMovieToPlay = null }
             )
         }
         
-        // Update Dialog
         if (updateConfig?.isUpdateAvailable == true && showUpdateDialog) {
             AlertDialog(
                 onDismissRequest = { showUpdateDialog = false },
-                title = { Text("¡Nueva versión disponible!", fontWeight = FontWeight.Black) },
-                text = { 
-                    Text(
-                        text = "Hay una actualización disponible (v${updateConfig?.latestVersionName}) de CFilm con mejoras y nuevas funciones. ¿Quieres descargarla e instalarla ahora?",
-                        lineHeight = 20.sp
-                    ) 
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            updateConfig?.updateUrl?.let { url ->
-                                viewModel.startUpdate(url)
-                            }
-                            showUpdateDialog = false
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                    ) {
-                        Text("Actualizar Ahora", color = Color.Black, fontWeight = FontWeight.Bold)
-                    }
-                },
-                dismissButton = {
-                    if (updateConfig?.isForceUpdate == false) {
-                        TextButton(onClick = { showUpdateDialog = false }) {
-                            Text("Más tarde", color = Color.Gray)
-                        }
-                    }
-                },
-                containerColor = Color(0xFF1A1A1A),
-                titleContentColor = Color.White,
-                textContentColor = Color.LightGray
+                title = { Text("¡Actualización!") },
+                text = { Text("Nueva versión v${updateConfig?.latestVersionName} disponible.") },
+                confirmButton = { Button(onClick = { updateConfig?.updateUrl?.let { viewModel.startUpdate(it) }; showUpdateDialog = false }) { Text("Actualizar") } },
+                dismissButton = { if (updateConfig?.isForceUpdate == false) TextButton(onClick = { showUpdateDialog = false }) { Text("Ahora no") } }
             )
         }
 
-        // Blocking Update Progress Dialog
         if (isDownloading) {
-            Dialog(
-                onDismissRequest = { },
-                properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false)
-            ) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    color = Color(0xFF1A1A1A),
-                    shape = RoundedCornerShape(24.dp),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
-                ) {
-                    Column(
-                        modifier = Modifier.padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+            Dialog(onDismissRequest = {}, properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false)) {
+                Surface(color = Color(0xFF1A1A1A), shape = RoundedCornerShape(24.dp)) {
+                    Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(progress = { downloadProgress })
+                        Text("Descargando actualización...", color = Color.White, modifier = Modifier.padding(top = 16.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun HomeTopBar(title: String, isWorking: Boolean, onSearchClick: () -> Unit) {
+    Box(modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(12.dp).zIndex(10f)) {
+        Surface(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)), color = Color.Black.copy(alpha = 0.8f), border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))) {
+            Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(text = title, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black, fontSize = 18.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (isWorking) CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                    IconButton(onClick = onSearchClick) { Icon(Icons.Default.Search, null, tint = Color.White) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SearchTopBar(query: String, onQueryChange: (String) -> Unit, onClose: () -> Unit) {
+    Box(modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(12.dp).zIndex(10f)) {
+        Surface(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)), color = Color(0xFF1A1A1A)) {
+            TextField(
+                value = query, onValueChange = onQueryChange, modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Buscar...", color = Color.Gray) },
+                colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                leadingIcon = { Icon(Icons.Default.Search, null, tint = Color.Gray) },
+                trailingIcon = { IconButton(onClick = onClose) { Icon(Icons.Default.Close, null, tint = Color.White) } },
+                singleLine = true
+            )
+        }
+    }
+}
+
+@Composable
+fun BottomNavBar(modifier: Modifier = Modifier, categories: List<String>, currentPage: Int, onPageSelected: (Int) -> Unit) {
+    Box(modifier = modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 16.dp).zIndex(10f)) {
+        Surface(modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(30.dp)), color = Color(0xFF121212).copy(alpha = 0.95f), border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))) {
+            Row(modifier = Modifier.padding(6.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+                categories.forEachIndexed { index, label ->
+                    val selected = currentPage == index
+                    Surface(
+                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(25.dp)).clickable { onPageSelected(index) },
+                        color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                        contentColor = if (selected) Color.Black else Color.White
                     ) {
-                        ParticleLoading(size = 120.dp)
-                        Spacer(modifier = Modifier.height(24.dp))
                         Text(
-                            text = "Actualizando CFilm",
-                            color = Color.White,
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Black
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Por favor, espera mientras se descarga la nueva versión. La aplicación se instalará automáticamente al finalizar.",
-                            color = Color.Gray,
+                            text = label, 
+                            modifier = Modifier.padding(vertical = 10.dp), 
+                            fontSize = 11.sp, 
+                            fontWeight = FontWeight.Bold, 
                             textAlign = TextAlign.Center,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Spacer(modifier = Modifier.height(32.dp))
-                        
-                        Box(contentAlignment = Alignment.Center) {
-                            LinearProgressIndicator(
-                                progress = { downloadProgress },
-                                modifier = Modifier.fillMaxWidth().height(12.dp).clip(CircleShape),
-                                color = MaterialTheme.colorScheme.primary,
-                                trackColor = Color.White.copy(alpha = 0.1f),
-                            )
-                        }
-                        
-                        Spacer(modifier = Modifier.height(12.dp))
-                        
-                        Text(
-                            text = "${(downloadProgress * 100).toInt()}%",
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.titleMedium
+                            maxLines = 1
                         )
                     }
                 }
@@ -434,367 +293,243 @@ fun HomeScreen(
 }
 
 @Composable
-fun SearchContent(
-    query: String,
-    history: List<String>,
-    results: List<Movie>,
-    onQueryChange: (String) -> Unit,
-    onMovieClick: (Int) -> Unit,
-    onClearHistory: () -> Unit
-) {
-    Column(modifier = Modifier.fillMaxSize().padding(top = 80.dp)) {
+fun SearchContent(query: String, history: List<String>, results: List<Movie>, onQueryChange: (String) -> Unit, onMovieClick: (Int) -> Unit, onClearHistory: () -> Unit) {
+    Column(modifier = Modifier.fillMaxSize().statusBarsPadding().padding(top = 85.dp)) {
         if (query.isBlank()) {
             if (history.isNotEmpty()) {
-                Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("Búsquedas recientes", color = Color.White, fontWeight = FontWeight.Bold)
-                    TextButton(onClick = onClearHistory) {
-                        Text("Limpiar", color = MaterialTheme.colorScheme.primary)
-                    }
+                Row(Modifier.fillMaxWidth().padding(16.dp), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+                    Text("Recientes", color = Color.White, fontWeight = FontWeight.Bold)
+                    TextButton(onClick = onClearHistory) { Text("Limpiar") }
                 }
-                LazyColumn {
-                    items(history) { item ->
-                        ListItem(
-                            headlineContent = { Text(item, color = Color.LightGray) },
-                            leadingContent = { Icon(Icons.Rounded.History, contentDescription = null, tint = Color.Gray) },
-                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                            modifier = Modifier.clickable { onQueryChange(item) }
-                        )
-                    }
-                }
-            } else {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Busca tus películas o series favoritas", color = Color.Gray)
-                }
+                LazyColumn { items(history) { Text(it, color = Color.Gray, modifier = Modifier.fillMaxWidth().clickable { onQueryChange(it) }.padding(16.dp)) } }
             }
         } else {
-            SearchGrid(results, onMovieClick)
+            LazyVerticalGrid(columns = GridCells.Fixed(3), contentPadding = PaddingValues(bottom = 100.dp, start = 16.dp, end = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                items(results, key = { it.id }) { MovieCardItem(it, onMovieClick) }
+            }
         }
+    }
+}
+
+@Composable
+fun HomeSectionsContent(sections: List<HomeSection>, onMovieClick: (Int) -> Unit, onPlay: (Movie) -> Unit) {
+    LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 110.dp, bottom = 100.dp)) {
+        items(sections, key = { it.title }) { section ->
+            Column(modifier = Modifier.padding(vertical = 12.dp)) {
+                Text(text = section.title, color = Color.White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 16.dp, bottom = 12.dp))
+                LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(section.items, key = { it.id }) { movie -> 
+                        if (section.isWatchingSection) WatchingCardItem(movie) { onPlay(movie) } 
+                        else MovieCardItem(movie, onMovieClick, width = 130.dp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CategoryTabContent(sections: List<HomeSection>, filtered: List<Movie>, genre: String?, onMovieClick: (Int) -> Unit) {
+    if (genre != null) {
+        LazyVerticalGrid(columns = GridCells.Fixed(3), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 110.dp, start = 8.dp, end = 8.dp, bottom = 100.dp), verticalArrangement = Arrangement.spacedBy(10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(filtered, key = { it.id }) { movie -> MovieCardItem(movie, onMovieClick) }
+        }
+    } else {
+        HomeSectionsContent(sections, onMovieClick, {})
     }
 }
 
 @Composable
 fun ProfileScreenContent(
-    user: User?,
-    watching: List<Movie>,
-    saved: List<Movie>,
-    liked: List<Movie>,
-    watchLater: List<Movie>,
-    finished: List<Movie>,
-    totalHours: Long,
-    viewModel: HomeViewModel,
-    onMovieClick: (Int) -> Unit,
-    onDirectPlayClick: (Movie) -> Unit,
+    user: User?, 
+    watching: List<Movie>, 
+    saved: List<Movie>, 
+    liked: List<Movie>, 
+    watchLater: List<Movie>, 
+    finished: List<Movie>, 
+    totalHours: Long, 
+    viewModel: HomeViewModel, 
+    onMovieClick: (Int) -> Unit, 
     cambiosStatus: String
 ) {
-    var selectedListCategory by remember { mutableStateOf<String?>(null) }
+    var selectedCategory by remember { mutableStateOf<String?>(null) }
     
-    BackHandler(enabled = selectedListCategory != null) {
-        selectedListCategory = null
+    BackHandler(enabled = selectedCategory != null) {
+        selectedCategory = null
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        AnimatedContent(
-            targetState = selectedListCategory,
-            transitionSpec = {
-                if (targetState != null) {
-                    slideInHorizontally { it } + fadeIn() togetherWith slideOutHorizontally { -it } + fadeOut()
-                } else {
-                    slideInHorizontally { -it } + fadeIn() togetherWith slideOutHorizontally { it } + fadeOut()
+    if (selectedCategory == null) {
+        LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 110.dp, bottom = 110.dp, start = 16.dp, end = 16.dp)) {
+            item {
+                Column(modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Surface(modifier = Modifier.size(90.dp).clip(CircleShape), color = Color.DarkGray) {
+                        if (user?.profilePictureUri != null) AsyncImage(model = user.profilePictureUri, contentDescription = null, contentScale = ContentScale.Crop)
+                        else Icon(Icons.Default.Person, null, modifier = Modifier.padding(20.dp), tint = Color.White)
+                    }
+                    Text(user?.username ?: "Usuario", color = Color.White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp))
+                    if (cambiosStatus.isNotEmpty()) {
+                        Text(cambiosStatus, color = MaterialTheme.colorScheme.primary, fontSize = 10.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 4.dp))
+                    }
                 }
-            },
-            label = "ProfileContentTransition"
-        ) { category ->
-            if (category == null) {
-                ProfileMainContent(
-                    user = user,
-                    watchingCount = watching.size,
-                    likedCount = liked.size,
-                    finishedCount = finished.size,
-                    watchLaterCount = watchLater.size,
-                    totalCount = watching.size + liked.size + finished.size + watchLater.size,
-                    totalHours = totalHours,
-                    onCategoryClick = { selectedListCategory = it },
-                    viewModel = viewModel,
-                    cambiosStatus = cambiosStatus 
+            }
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    ProfileGridItem("Favoritos", liked.size, Icons.Rounded.Favorite, Color.Red) { selectedCategory = "Favoritos" }
+                    ProfileGridItem("Viendo", watching.size, Icons.Rounded.PlayCircle, Color.Blue) { selectedCategory = "Viendo" }
+                    ProfileGridItem("Terminados", finished.size, Icons.Rounded.CheckCircle, Color.Green) { selectedCategory = "Terminados" }
+                    ProfileGridItem("Ver Después", watchLater.size, Icons.Rounded.WatchLater, Color.Yellow) { selectedCategory = "Ver Después" }
+                    ProfileGridItem("Guardados", saved.size, Icons.Rounded.Bookmark, Color.Magenta) { selectedCategory = "Guardados" }
+                }
+            }
+            item {
+                Spacer(Modifier.height(24.dp))
+                Surface(modifier = Modifier.fillMaxWidth(), color = Color(0xFF1A1A1A), shape = RoundedCornerShape(16.dp)) {
+                    Row(modifier = Modifier.padding(20.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            val totalCount = liked.size + watching.size + finished.size + watchLater.size + saved.size
+                            Text(text = totalCount.toString(), color = MaterialTheme.colorScheme.primary, fontSize = 20.sp, fontWeight = FontWeight.Black)
+                            Text(text = "Contenido", color = Color.Gray, fontSize = 11.sp)
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(text = "~$totalHours", color = MaterialTheme.colorScheme.primary, fontSize = 20.sp, fontWeight = FontWeight.Black)
+                            Text(text = "Horas", color = Color.Gray, fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+            item {
+                Spacer(Modifier.height(24.dp))
+                ProfileSettingItem("Limpiar Caché", Icons.Default.Delete) { viewModel.clearCache() }
+                if (user?.isLoggedIn == true) ProfileSettingItem("Cerrar Sesión", Icons.AutoMirrored.Filled.ExitToApp, Color.Red, Color.Red) { viewModel.logout() }
+            }
+        }
+    } else {
+        val list = when(selectedCategory) { 
+            "Favoritos" -> liked
+            "Viendo" -> watching
+            "Terminados" -> finished
+            "Ver Después" -> watchLater
+            "Guardados" -> saved
+            else -> emptyList() 
+        }
+        Column(Modifier.fillMaxSize().background(Color.Black)) {
+            // Se usa statusBarsPadding + top padding para asegurar que el título y el botón
+            // aparezcan debajo de la HomeTopBar (CFilm/Buscador) sin solaparse.
+            Row(
+                Modifier
+                    .statusBarsPadding()
+                    .padding(top = 75.dp, start = 8.dp, end = 16.dp, bottom = 8.dp), 
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = { selectedCategory = null }) { 
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.White) 
+                }
+                Text(
+                    text = selectedCategory!!, 
+                    color = Color.White, 
+                    style = MaterialTheme.typography.titleLarge, 
+                    fontWeight = FontWeight.Black
                 )
+            }
+            if (list.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("No hay nada aquí todavía", color = Color.Gray)
+                }
             } else {
-                val listToShow = when(category) {
-                    "Favoritos" -> liked
-                    "Viendo" -> watching
-                    "Terminados" -> finished
-                    "Ver Después" -> watchLater
-                    "Guardados" -> saved
-                    else -> emptyList()
+                LazyVerticalGrid(columns = GridCells.Fixed(3), contentPadding = PaddingValues(bottom = 100.dp, start = 16.dp, end = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    items(list, key = { it.id }) { MovieCardItem(it, onMovieClick) }
                 }
-                ProfileListDetail(
-                    title = category,
-                    items = listToShow,
-                    onBack = { selectedListCategory = null },
-                    onMovieClick = onMovieClick
-                )
             }
         }
     }
 }
 
 @Composable
-fun ProfileMainContent(
-    user: User?,
-    watchingCount: Int,
-    likedCount: Int,
-    finishedCount: Int,
-    watchLaterCount: Int,
-    totalCount: Int,
-    totalHours: Long,
-    onCategoryClick: (String) -> Unit,
-    viewModel: HomeViewModel,
-    cambiosStatus: String
-) {
+fun MovieCardItem(movie: Movie, onClick: (Int) -> Unit, width: androidx.compose.ui.unit.Dp? = null) {
     val context = LocalContext.current
-    val activity = context as Activity
-    val launcher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let { viewModel.updateAvatar(it.toString()) }
+    val movieRequest = remember(movie.posterUrl) {
+        ImageRequest.Builder(context).data(movie.posterUrl).crossfade(true).diskCachePolicy(CachePolicy.ENABLED).memoryCachePolicy(CachePolicy.ENABLED).build()
+    }
+    
+    val isNew = remember(movie.createdAt) {
+        System.currentTimeMillis() - movie.createdAt < 2 * 24 * 60 * 60 * 1000L
     }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(top = 80.dp, bottom = 120.dp, start = 16.dp, end = 16.dp)
-    ) {
-        item {
-            Column(modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(contentAlignment = Alignment.BottomEnd) {
-                    Surface(modifier = Modifier.size(100.dp).clip(CircleShape).clickable { launcher.launch("image/*") }, color = Color.DarkGray) {
-                        if (user?.profilePictureUri != null) {
-                            AsyncImage(
-                                model = ImageRequest.Builder(context).data(user.profilePictureUri).crossfade(true).build(),
-                                contentDescription = null,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
-                        } else {
-                            Icon(imageVector = Icons.Default.Person, contentDescription = null, modifier = Modifier.padding(20.dp), tint = Color.White)
-                        }
-                    }
-                    Surface(modifier = Modifier.size(32.dp).clip(CircleShape).clickable { launcher.launch("image/*") }, color = MaterialTheme.colorScheme.primary, contentColor = Color.Black) {
-                        Icon(imageVector = Icons.Default.Edit, contentDescription = "Editar", modifier = Modifier.padding(8.dp).size(16.dp))
-                    }
-                }
-                Text(
-                    text = user?.username ?: "Usuario CFilm",
-                    color = Color.White,
-                    style = MaterialTheme.typography.headlineSmall,
-                    modifier = Modifier.padding(top = 16.dp),
-                    fontWeight = FontWeight.Bold
-                )
-
-                if (cambiosStatus.isNotBlank()) {
+    Column(modifier = (if (width != null) Modifier.width(width) else Modifier.fillMaxWidth()).clickable { onClick(movie.id) }) {
+        Card(modifier = Modifier.aspectRatio(0.7f), shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1A))) {
+            Box {
+                AsyncImage(model = movieRequest, contentDescription = movie.title, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                
+                if (isNew) {
                     Surface(
-                        modifier = Modifier.padding(top = 8.dp),
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
-                        shape = RoundedCornerShape(8.dp),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
+                        modifier = Modifier.align(Alignment.TopStart).padding(4.dp),
+                        color = Color(0xFFFFD700),
+                        shape = RoundedCornerShape(4.dp)
                     ) {
                         Text(
-                            text = cambiosStatus,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                            color = MaterialTheme.colorScheme.primary,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = 1.sp
+                            text = "NEW",
+                            color = Color.Black,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                         )
                     }
                 }
-            }
-        }
 
-        item {
-            Text(text = "Mis Listas", color = Color.White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, modifier = Modifier.padding(bottom = 16.dp))
-        }
-
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    ProfileGridItem(title = "Favoritos", count = likedCount, icon = Icons.Rounded.Favorite, iconColor = Color(0xFFE50914), modifier = Modifier.weight(1f), onClick = { onCategoryClick("Favoritos") })
-                    ProfileGridItem(title = "Viendo", count = watchingCount, icon = Icons.Rounded.PlayCircle, iconColor = Color(0xFF2196F3), modifier = Modifier.weight(1f), onClick = { onCategoryClick("Viendo") })
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    ProfileGridItem(title = "Terminados", count = finishedCount, icon = Icons.Rounded.CheckCircle, iconColor = Color(0xFF4CAF50), modifier = Modifier.weight(1f), onClick = { onCategoryClick("Terminados") })
-                    ProfileGridItem(title = "Ver Después", count = watchLaterCount, icon = Icons.Rounded.WatchLater, iconColor = Color(0xFFFF9800), modifier = Modifier.weight(1f), onClick = { onCategoryClick("Ver Después") })
-                }
-            }
-        }
-
-        item {
-            Spacer(modifier = Modifier.height(20.dp))
-            Surface(modifier = Modifier.fillMaxWidth(), color = Color(0xFF1A1A1A), shape = RoundedCornerShape(20.dp)) {
-                Row(modifier = Modifier.padding(24.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(text = totalCount.toString(), color = Color(0xFFE50914), fontSize = 24.sp, fontWeight = FontWeight.Black)
-                        Text(text = "Total Contenido", color = Color.Gray, fontSize = 12.sp)
-                    }
-                    Box(modifier = Modifier.width(1.dp).height(40.dp).background(Color.DarkGray).align(Alignment.CenterVertically))
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(text = "~$totalHours", color = Color(0xFFE50914), fontSize = 24.sp, fontWeight = FontWeight.Black)
-                        Text(text = "Horas Aprox.", color = Color.Gray, fontSize = 12.sp)
+                if (movie.rating > 0) {
+                    Surface(modifier = Modifier.align(Alignment.TopEnd).padding(4.dp), color = Color.Black.copy(alpha = 0.6f), shape = RoundedCornerShape(4.dp)) {
+                        Text(text = String.format(Locale.US, "%.1f", movie.rating), color = Color(0xFFFFD700), fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
                     }
                 }
             }
         }
-
-        item {
-            Spacer(modifier = Modifier.height(32.dp))
-            Text(text = "Ajustes", color = Color.White, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
-            ProfileSettingItem(title = "Limpiar Caché", icon = Icons.Default.Delete, onClick = { viewModel.clearCache() })
-            ProfileSettingItem(title = "Anuncios Test Suite", icon = Icons.Default.BugReport, onClick = { viewModel.launchTestSuite(activity) })
-            if (user?.isLoggedIn == true) {
-                ProfileSettingItem(title = "Cerrar Sesión", icon = Icons.AutoMirrored.Filled.ExitToApp, iconColor = Color.Red, textColor = Color.Red, onClick = { viewModel.logout() })
-            }
-        }
-    }
-}
-
-@Composable
-fun ProfileGridItem(title: String, count: Int, icon: ImageVector, iconColor: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Surface(modifier = modifier.height(120.dp).clickable { onClick() }, color = Color(0xFF1A1A1A), shape = RoundedCornerShape(20.dp), border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.SpaceBetween) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(imageVector = icon, contentDescription = null, tint = iconColor, modifier = Modifier.size(24.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(text = count.toString(), color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Black)
-            }
-            Text(text = title, color = Color.Gray, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-        }
-    }
-}
-
-@Composable
-fun ProfileSettingItem(title: String, icon: ImageVector, iconColor: Color = Color.Gray, textColor: Color = Color.White, onClick: () -> Unit) {
-    ListItem(headlineContent = { Text(title, color = textColor) }, leadingContent = { Icon(icon, contentDescription = null, tint = iconColor) }, colors = ListItemDefaults.colors(containerColor = Color.Transparent), modifier = Modifier.clickable { onClick() })
-}
-
-@Composable
-fun ProfileListDetail(title: String, items: List<Movie>, onBack: () -> Unit, onMovieClick: (Int) -> Unit) {
-    Column(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        Row(modifier = Modifier.statusBarsPadding().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver", tint = Color.White) }
-            Spacer(Modifier.width(8.dp))
-            Text(text = title, color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
-        }
-        if (items.isEmpty()) { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(text = "No hay nada aquí todavía", color = Color.Gray) } } else {
-            LazyVerticalGrid(columns = GridCells.Fixed(3), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(items, key = { it.id }) { movie -> MovieCardItem(movie, onClick = onMovieClick) }
-            }
-        }
-    }
-}
-
-@Composable
-fun CategoryBubbleItem(label: String, selected: Boolean, onClick: () -> Unit) {
-    Surface(
-        modifier = Modifier.clip(RoundedCornerShape(25.dp)).clickable { onClick() }, 
-        color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent, 
-        contentColor = if (selected) Color.Black else Color.White
-    ) {
-        Text(
-            text = label, 
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp), 
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1
-        )
-    }
-}
-
-@Composable
-fun HomeSectionsContent(sections: List<HomeSection>, onMovieClick: (Int) -> Unit, onDirectPlayClick: (Movie) -> Unit, announcement: String? = null) {
-    LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 80.dp, bottom = 120.dp)) {
-        if (!announcement.isNullOrBlank()) {
-            item {
-                Surface(modifier = Modifier.fillMaxWidth().padding(16.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f), shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))) {
-                    Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.width(12.dp))
-                        Text(text = announcement, color = Color.White, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-        itemsIndexed(sections, key = { _, section -> section.title }) { _, section ->
-            Column(modifier = Modifier.padding(vertical = 12.dp)) {
-                Text(text = section.title, color = Color.White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp))
-                LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(section.items, key = { it.id }) { movie -> 
-                        if (section.isWatchingSection) { WatchingCardItem(movie) { onDirectPlayClick(movie) } } else { MovieCardItem(movie, { onMovieClick(it) }, width = 130.dp) }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun CategoryTabContent(sections: List<HomeSection>, filteredList: List<Movie>, selectedGenre: String?, onMovieClick: (Int) -> Unit) {
-    if (selectedGenre != null) { VerticalMovieGrid(movies = filteredList, onMovieClick = onMovieClick) } else {
-        LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 80.dp, bottom = 120.dp)) {
-            itemsIndexed(sections, key = { _, section -> section.title }) { _, section ->
-                Column(modifier = Modifier.padding(vertical = 12.dp)) {
-                    Text(text = section.title, color = Color.White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp))
-                    LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        items(section.items, key = { it.id }) { movie -> MovieCardItem(movie, { onMovieClick(it) }, width = 130.dp) }
-                    }
-                }
-            }
-        }
+        Text(text = movie.title, color = Color.White, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp, start = 2.dp))
     }
 }
 
 @Composable
 fun WatchingCardItem(movie: Movie, onClick: () -> Unit) {
     Column(modifier = Modifier.width(200.dp).clickable { onClick() }) {
-        Card(modifier = Modifier.height(110.dp).fillMaxWidth(), shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1A))) {
+        Card(modifier = Modifier.height(110.dp).fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
             Box {
-                AsyncImage(model = movie.backdropUrl ?: movie.posterUrl, contentDescription = movie.title, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.3f)))
-                Icon(imageVector = Icons.Default.PlayCircleOutline, contentDescription = null, modifier = Modifier.size(36.dp).align(Alignment.Center), tint = Color.White)
+                AsyncImage(model = movie.backdropUrl ?: movie.posterUrl, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                Icon(Icons.Default.PlayCircleOutline, null, modifier = Modifier.size(36.dp).align(Alignment.Center), tint = Color.White)
                 if (movie.totalDuration > 0) {
-                    val progressRatio = movie.lastPosition.toFloat() / movie.totalDuration.toFloat()
-                    Box(modifier = Modifier.fillMaxWidth().height(4.dp).background(Color.Gray.copy(alpha = 0.5f)).align(Alignment.BottomStart)) {
-                        Box(modifier = Modifier.fillMaxWidth(progressRatio.coerceIn(0f, 1f)).fillMaxHeight().background(MaterialTheme.colorScheme.primary))
-                    }
+                    val progress = movie.lastPosition.toFloat() / movie.totalDuration.toFloat()
+                    LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(4.dp).align(Alignment.BottomStart), color = MaterialTheme.colorScheme.primary, trackColor = Color.Transparent)
                 }
             }
         }
-        Text(text = movie.title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+        Text(text = movie.title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, modifier = Modifier.padding(top = 6.dp))
     }
 }
 
 @Composable
-fun VerticalMovieGrid(movies: List<Movie>, onMovieClick: (Int) -> Unit, topPadding: androidx.compose.ui.unit.Dp = 80.dp) {
-    LazyVerticalGrid(columns = GridCells.Fixed(3), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(top = topPadding, start = 8.dp, end = 8.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        items(movies, key = { it.id }) { movie -> MovieCardItem(movie, { onMovieClick(it) }) }
-    }
-}
-
-@Composable
-fun SearchGrid(movies: List<Movie>, onMovieClick: (Int) -> Unit) {
-    LazyVerticalGrid(columns = GridCells.Fixed(3), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 16.dp, start = 8.dp, end = 8.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        items(movies, key = { it.id }) { movie -> MovieCardItem(movie, { onMovieClick(it) }) }
-    }
-}
-
-@Composable
-fun MovieCardItem(movie: Movie, onClick: (Int) -> Unit, width: androidx.compose.ui.unit.Dp? = null) {
-    val modifier = if (width != null) Modifier.width(width) else Modifier.fillMaxWidth()
-    val context = LocalContext.current
-    Column(modifier = modifier.clickable { onClick(movie.id) }) {
-        Card(modifier = Modifier.aspectRatio(0.7f), shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1A))) {
-            Box {
-                AsyncImage(model = ImageRequest.Builder(context).data(movie.posterUrl).crossfade(true).diskCachePolicy(CachePolicy.ENABLED).memoryCachePolicy(CachePolicy.ENABLED).build(), contentDescription = movie.title, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                if (movie.rating > 0) { Surface(modifier = Modifier.align(Alignment.TopEnd).padding(4.dp), color = Color.Black.copy(alpha = 0.6f), shape = RoundedCornerShape(4.dp)) { Text(text = String.format(Locale.US, "%.1f", movie.rating), color = Color(0xFFFFD700), fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)) } }
+fun ProfileGridItem(title: String, count: Int, icon: ImageVector, color: Color, onClick: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().height(80.dp).clickable { onClick() }, 
+        color = Color(0xFF1A1A1A), 
+        shape = RoundedCornerShape(16.dp), 
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 20.dp), 
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(modifier = Modifier.size(40.dp), shape = CircleShape, color = color.copy(alpha = 0.1f)) {
+                    Icon(icon, null, tint = color, modifier = Modifier.padding(8.dp))
+                }
+                Spacer(Modifier.width(16.dp))
+                Text(title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
             }
+            Text(count.toString(), color = Color.Gray, fontWeight = FontWeight.Black, fontSize = 18.sp)
         }
-        Text(text = movie.title, color = Color.White, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp, start = 2.dp))
     }
+}
+
+@Composable
+fun ProfileSettingItem(title: String, icon: ImageVector, color: Color = Color.Gray, textColor: Color = Color.White, onClick: () -> Unit) {
+    ListItem(headlineContent = { Text(title, color = textColor) }, leadingContent = { Icon(icon, null, tint = color) }, colors = ListItemDefaults.colors(containerColor = Color.Transparent), modifier = Modifier.clickable { onClick() })
 }

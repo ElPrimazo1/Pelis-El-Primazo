@@ -38,6 +38,7 @@ interface MovieRepository {
     fun isMovieSaved(movieId: Int): Flow<Boolean>
     fun isMovieInWatchLater(movieId: Int): Flow<Boolean>
     fun isMovieFinished(movieId: Int): Flow<Boolean>
+    fun isMovieWatching(movieId: Int): Flow<Boolean>
 
     // Search History
     fun getSearchHistory(): Flow<List<String>>
@@ -53,4 +54,5 @@ interface MovieRepository {
     suspend fun login(email: String, password: String): Boolean
     suspend fun logout()
     suspend fun updateAvatar(uri: String)
+    suspend fun resetPassword(email: String)
 }

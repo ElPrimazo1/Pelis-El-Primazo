@@ -197,6 +197,22 @@ class MovieRepositoryImpl @Inject constructor(
                         val totalDur = remoteProgress?.duration ?: existing?.totalDuration ?: 0L
                         val timestamp = remoteProgress?.timestamp ?: existing?.timestamp ?: System.currentTimeMillis()
 
+                        // Logic for notifications and createdAt
+                        val isNewEpisode = existing != null && (primaryInfo.isTv || primaryInfo.isAnime) && 
+                                           allLinks.size > (existing.serverLinks.size)
+                        
+                        if (isNewEpisode && existing!!.isWatching) {
+                            notificationHelper.showNewEpisodeNotification(
+                                tmdbData?.title ?: primaryInfo.cleanTitle.capitalizeWords(),
+                                primaryInfo.season,
+                                primaryInfo.episode,
+                                id
+                            )
+                        }
+
+                        val createdAt = if (existing == null) syncStartTime else existing.createdAt
+                        val lastUpdated = if (isNewEpisode) syncStartTime else (existing?.lastUpdated ?: syncStartTime)
+
                         val entity = MovieEntity(
                             id = id,
                             title = tmdbData?.title ?: primaryInfo.cleanTitle.capitalizeWords(),
@@ -226,7 +242,8 @@ class MovieRepositoryImpl @Inject constructor(
                             lastPosition = lastPos,
                             totalDuration = totalDur,
                             timestamp = timestamp,
-                            lastUpdated = syncStartTime
+                            lastUpdated = lastUpdated,
+                            createdAt = createdAt
                         )
                         
                         entity
@@ -574,21 +591,15 @@ class MovieRepositoryImpl @Inject constructor(
         movieDao.clearAllMovies()
     }
 
-    override fun isMovieLiked(movieId: Int): Flow<Boolean> = movieDao.getAllMovies().map { list ->
-        list.any { it.id == movieId && it.isLiked }
-    }
+    override fun isMovieLiked(movieId: Int): Flow<Boolean> = movieDao.getMovieFlowById(movieId).map { it?.isLiked ?: false }
 
-    override fun isMovieSaved(movieId: Int): Flow<Boolean> = movieDao.getAllMovies().map { list ->
-        list.any { it.id == movieId && it.isSaved }
-    }
+    override fun isMovieSaved(movieId: Int): Flow<Boolean> = movieDao.getMovieFlowById(movieId).map { it?.isSaved ?: false }
 
-    override fun isMovieInWatchLater(movieId: Int): Flow<Boolean> = movieDao.getAllMovies().map { list ->
-        list.any { it.id == movieId && it.isWatchLater }
-    }
+    override fun isMovieInWatchLater(movieId: Int): Flow<Boolean> = movieDao.getMovieFlowById(movieId).map { it?.isWatchLater ?: false }
 
-    override fun isMovieFinished(movieId: Int): Flow<Boolean> = movieDao.getAllMovies().map { list ->
-        list.any { it.id == movieId && it.isFinished }
-    }
+    override fun isMovieFinished(movieId: Int): Flow<Boolean> = movieDao.getMovieFlowById(movieId).map { it?.isFinished ?: false }
+    
+    override fun isMovieWatching(movieId: Int): Flow<Boolean> = movieDao.getMovieFlowById(movieId).map { it?.isWatching ?: false }
 
     override fun getSearchHistory(): Flow<List<String>> = searchHistoryDao.getSearchHistory()
 
@@ -686,6 +697,10 @@ class MovieRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun resetPassword(email: String) {
+        firebaseAuth.sendPasswordResetEmail(email).await()
+    }
+
     private fun MovieEntity.toDomain() = Movie(
         id = id,
         title = title,
@@ -709,7 +724,8 @@ class MovieRepositoryImpl @Inject constructor(
         isWatchLater = isWatchLater,
         isWatching = isWatching,
         isSaved = isSaved,
-        isFinished = isFinished
+        isFinished = isFinished,
+        createdAt = createdAt
     )
 
     private fun String.capitalizeWords() = split(" ").joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }

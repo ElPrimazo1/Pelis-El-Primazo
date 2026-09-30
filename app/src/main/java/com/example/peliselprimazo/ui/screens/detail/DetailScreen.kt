@@ -43,7 +43,7 @@ import com.example.peliselprimazo.ui.components.ParticleLoading
 fun DetailScreen(
     viewModel: DetailViewModel,
     onBack: () -> Unit,
-    onPlay: (String, String) -> Unit // Simplificado: solo necesitamos server y fileId
+    onPlay: (String, String) -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val isPreloading by viewModel.preloadingVideo.collectAsState()
@@ -52,6 +52,7 @@ fun DetailScreen(
     val isViendo by viewModel.isViendo.collectAsState()
     val isTerminado by viewModel.isTerminado.collectAsState()
     val isVerDespues by viewModel.isVerDespues.collectAsState()
+    val isGuardado by viewModel.isGuardado.collectAsState()
     
     val user by viewModel.user.collectAsState()
     
@@ -104,10 +105,12 @@ fun DetailScreen(
                         isViendo = isViendo,
                         isTerminado = isTerminado,
                         isVerDespues = isVerDespues,
+                        isGuardado = isGuardado,
                         onFavoritoToggle = { handleActionWithAuth { viewModel.toggleFavorito() } },
                         onViendoToggle = { handleActionWithAuth { viewModel.toggleViendo() } },
                         onTerminadoToggle = { handleActionWithAuth { viewModel.toggleTerminado() } },
                         onVerDespuesToggle = { handleActionWithAuth { viewModel.toggleVerDespues() } },
+                        onGuardadoToggle = { handleActionWithAuth { viewModel.toggleGuardado() } },
                         onTrailerClick = { url ->
                             try {
                                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
@@ -155,7 +158,6 @@ fun DetailScreen(
                 }
             }
 
-            // Overlay de carga (ahora manejado por MainActivity si prefieres, o lo dejamos aquí para feedback visual)
             AnimatedVisibility(
                 visible = isPreloading,
                 enter = fadeIn(),
@@ -199,10 +201,12 @@ fun DetailContent(
     isViendo: Boolean,
     isTerminado: Boolean,
     isVerDespues: Boolean,
+    isGuardado: Boolean,
     onFavoritoToggle: () -> Unit,
     onViendoToggle: () -> Unit,
     onTerminadoToggle: () -> Unit,
     onVerDespuesToggle: () -> Unit,
+    onGuardadoToggle: () -> Unit,
     onTrailerClick: (String) -> Unit,
     onPlayButtonClick: () -> Unit
 ) {
@@ -214,10 +218,12 @@ fun DetailContent(
                 isViendo = isViendo,
                 isTerminado = isTerminado,
                 isVerDespues = isVerDespues,
+                isGuardado = isGuardado,
                 onFavoritoToggle = onFavoritoToggle,
                 onViendoToggle = onViendoToggle,
                 onTerminadoToggle = onTerminadoToggle,
-                onVerDespuesToggle = onVerDespuesToggle
+                onVerDespuesToggle = onVerDespuesToggle,
+                onGuardadoToggle = onGuardadoToggle
             )
         }
         
@@ -346,13 +352,15 @@ fun UserActionRow(
     isViendo: Boolean,
     isTerminado: Boolean,
     isVerDespues: Boolean,
+    isGuardado: Boolean,
     onFavoritoToggle: () -> Unit,
     onViendoToggle: () -> Unit,
     onTerminadoToggle: () -> Unit,
-    onVerDespuesToggle: () -> Unit
+    onVerDespuesToggle: () -> Unit,
+    onGuardadoToggle: () -> Unit
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.SpaceEvenly
     ) {
         DetailActionButton(
@@ -360,6 +368,7 @@ fun UserActionRow(
             label = "Favoritos", 
             selected = isFavorito, 
             selectedColor = Color(0xFFE50914),
+            modifier = Modifier.weight(1f),
             onClick = onFavoritoToggle
         )
         DetailActionButton(
@@ -367,6 +376,7 @@ fun UserActionRow(
             label = "Viendo", 
             selected = isViendo, 
             selectedColor = Color(0xFF2196F3),
+            modifier = Modifier.weight(1f),
             onClick = onViendoToggle
         )
         DetailActionButton(
@@ -374,6 +384,7 @@ fun UserActionRow(
             label = "Terminados", 
             selected = isTerminado, 
             selectedColor = Color(0xFF4CAF50),
+            modifier = Modifier.weight(1f),
             onClick = onTerminadoToggle
         )
         DetailActionButton(
@@ -381,7 +392,16 @@ fun UserActionRow(
             label = "Ver Después", 
             selected = isVerDespues, 
             selectedColor = Color(0xFFFF9800),
+            modifier = Modifier.weight(1f),
             onClick = onVerDespuesToggle
+        )
+        DetailActionButton(
+            icon = if (isGuardado) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder, 
+            label = "Guardado", 
+            selected = isGuardado, 
+            selectedColor = Color(0xFF9C27B0),
+            modifier = Modifier.weight(1f),
+            onClick = onGuardadoToggle
         )
     }
 }
@@ -392,23 +412,32 @@ fun DetailActionButton(
     label: String, 
     selected: Boolean, 
     selectedColor: Color = Color.White,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally, 
-        modifier = Modifier
+        modifier = modifier
             .clip(RoundedCornerShape(8.dp))
             .clickable { onClick() }
-            .padding(8.dp)
+            .padding(vertical = 8.dp)
     ) {
         Icon(
             imageVector = icon, 
             contentDescription = label, 
             tint = if (selected) selectedColor else Color.White, 
-            modifier = Modifier.size(26.dp)
+            modifier = Modifier.size(24.dp)
         )
-        Spacer(Modifier.height(6.dp))
-        Text(text = label, color = if (selected) Color.White else Color.Gray, fontSize = 10.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = label, 
+            color = if (selected) Color.White else Color.Gray, 
+            fontSize = 9.sp, 
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Visible
+        )
     }
 }
 

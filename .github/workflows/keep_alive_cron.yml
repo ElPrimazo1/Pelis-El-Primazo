@@ -26,4 +26,7 @@ jobs:
         pip install requests
 
     - name: Ejecutar script de renovación
+      env:
+        STREAMTAPE_LOGIN: ${{ secrets.STREAMTAPE_LOGIN }}
+        STREAMTAPE_KEY: ${{ secrets.STREAMTAPE_KEY }}
       run: python keep_alive.py

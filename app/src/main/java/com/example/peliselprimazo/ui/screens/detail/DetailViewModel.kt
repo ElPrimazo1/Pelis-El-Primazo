@@ -30,29 +30,38 @@ class DetailViewModel @Inject constructor(
     private val _uiState = MutableStateFlow<DetailUiState>(DetailUiState.Loading)
     val uiState: StateFlow<DetailUiState> = _uiState.asStateFlow()
 
-    private val _isLoadingAuth = MutableStateFlow(false)
-    val isLoadingAuth = _isLoadingAuth.asStateFlow()
-
     private val _preloadingVideo = MutableStateFlow(false)
     val preloadingVideo = _preloadingVideo.asStateFlow()
 
     private val _error = MutableStateFlow<String?>(null)
     val error = _error.asStateFlow()
 
+    private val _isLoadingAuth = MutableStateFlow(false)
+    val isLoadingAuth = _isLoadingAuth.asStateFlow()
+
+    // Optimizados con distinctUntilChanged() para máxima fluidez en Compose
     val user = repository.getUser()
+        .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     val isFavorito = repository.isMovieLiked(movieId)
+        .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
-    val isViendo = repository.getAllContent().map { list ->
-        list.any { it.id == movieId && it.isWatching }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val isViendo = repository.isMovieWatching(movieId)
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     val isTerminado = repository.isMovieFinished(movieId)
+        .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     val isVerDespues = repository.isMovieInWatchLater(movieId)
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    val isGuardado = repository.isMovieSaved(movieId)
+        .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     init {
@@ -63,11 +72,14 @@ class DetailViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = DetailUiState.Loading
             try {
-                val movie = repository.getMovieById(movieId)
-                if (movie != null) {
-                    _uiState.value = DetailUiState.Success(movie)
+                // Carga en IO para no laguear la animación de entrada
+                val movie = withContext(Dispatchers.IO) {
+                    repository.getMovieById(movieId)
+                }
+                _uiState.value = if (movie != null) {
+                    DetailUiState.Success(movie)
                 } else {
-                    _uiState.value = DetailUiState.Error("No se encontró el contenido")
+                    DetailUiState.Error("Contenido no encontrado")
                 }
             } catch (e: Exception) {
                 _uiState.value = DetailUiState.Error(e.message ?: "Error desconocido")
@@ -75,77 +87,67 @@ class DetailViewModel @Inject constructor(
         }
     }
 
-    // Corregido: Ajustado a la nueva firma de AdsManager y callback booleano
-    fun showRewardedVideo(activity: Activity, placementName: String? = null, onReward: () -> Unit) {
-        adsManager.showRewardedVideo(activity, placementName) { success ->
-            if (success) onReward()
+    fun showRewardedVideo(activity: Activity, onReward: () -> Unit) {
+        viewModelScope.launch {
+            _preloadingVideo.value = true
+            adsManager.showRewardedVideo(activity) { success ->
+                _preloadingVideo.value = false
+                if (success) onReward()
+            }
         }
     }
 
-    fun prepareAndPlay(
-        server: String, 
-        fileId: String, 
-        onReady: (String, String?) -> Unit
-    ) {
+    fun prepareAndPlay(server: String, fileId: String, onReady: (String) -> Unit) {
         viewModelScope.launch {
             _preloadingVideo.value = true
+            _error.value = null
             try {
                 val extractor = extractorFactory.getExtractor(server)
-                // Corregido: Destructuración del par (URL, Headers) devuelto por el extractor
                 val (videoUrl, _) = withContext(Dispatchers.IO) {
                     extractor.extract(fileId, repository)
                 }
-                
                 if (!videoUrl.isNullOrBlank()) {
-                    Log.d(tag, "Video extraído correctamente. Pasando al reproductor.")
-                    onReady(videoUrl, null)
+                    onReady(videoUrl)
                 } else {
-                    _error.value = "No se pudo obtener el enlace de video"
+                    _error.value = "Enlace no disponible en este momento"
                 }
             } catch (e: Exception) {
-                Log.e(tag, "Error al preparar video", e)
-                _error.value = "Error al preparar video: ${e.message}"
+                Log.e(tag, "Error al extraer video", e)
+                _error.value = "Error al conectar con el servidor"
             } finally {
                 _preloadingVideo.value = false
             }
         }
     }
 
-    fun toggleFavorito() { viewModelScope.launch { repository.toggleLike(movieId) } }
-    fun toggleViendo() { viewModelScope.launch { repository.addToWatching(movieId) } }
-    fun toggleTerminado() { viewModelScope.launch { repository.toggleFinished(movieId) } }
-    fun toggleVerDespues() { viewModelScope.launch { repository.toggleWatchLater(movieId) } }
+    // Acciones lanzadas explícitamente en el pool de IO
+    fun toggleFavorito() = viewModelScope.launch(Dispatchers.IO) { repository.toggleLike(movieId) }
+    fun toggleVerDespues() = viewModelScope.launch(Dispatchers.IO) { repository.toggleWatchLater(movieId) }
+    fun toggleTerminado() = viewModelScope.launch(Dispatchers.IO) { repository.toggleFinished(movieId) }
+    fun toggleViendo() = viewModelScope.launch(Dispatchers.IO) { repository.addToWatching(movieId) }
+    fun toggleGuardado() = viewModelScope.launch(Dispatchers.IO) { repository.toggleSave(movieId) }
+
+    fun clearError() { _error.value = null }
 
     fun login(e: String, p: String, onSuccess: () -> Unit) {
         viewModelScope.launch {
             _isLoadingAuth.value = true
-            _error.value = null
-            try {
-                if (repository.login(e, p)) {
-                    _isLoadingAuth.value = false
-                    onSuccess()
-                } else {
-                    _error.value = "Credenciales incorrectas"
-                    _isLoadingAuth.value = false
-                }
-            } catch (e: Exception) {
-                _error.value = e.message ?: "Error al iniciar sesión"
-                _isLoadingAuth.value = false
-            }
+            val success = withContext(Dispatchers.IO) { repository.login(e, p) }
+            _isLoadingAuth.value = false
+            if (success) onSuccess() else _error.value = "Credenciales incorrectas"
         }
     }
 
     fun register(u: String, e: String, p: String, onSuccess: () -> Unit) {
         viewModelScope.launch {
             _isLoadingAuth.value = true
-            _error.value = null
             try {
-                repository.register(u, e, p)
+                withContext(Dispatchers.IO) { repository.register(u, e, p) }
                 _isLoadingAuth.value = false
                 onSuccess()
             } catch (e: Exception) {
-                _error.value = e.message ?: "Error al registrarse"
                 _isLoadingAuth.value = false
+                _error.value = e.message ?: "Error en el registro"
             }
         }
     }

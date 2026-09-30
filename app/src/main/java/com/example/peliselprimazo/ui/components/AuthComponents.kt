@@ -96,7 +96,7 @@ fun AuthDialog(
                 Spacer(Modifier.height(24.dp))
 
                 Text(
-                    text = if (isRegisterMode) "Únete al Primazo" else "¡Hola de nuevo!",
+                    text = if (isRegisterMode) "Unete a CFilm" else "¡Hola de nuevo!",
                     style = MaterialTheme.typography.headlineSmall,
                     color = Color.White,
                     fontWeight = FontWeight.Black,

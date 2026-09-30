@@ -10,6 +10,12 @@ data class CastMember(
     val profilePath: String?
 )
 
+data class Subtitle(
+    val url: String,
+    val label: String,
+    val language: String
+)
+
 data class Movie(
     val id: Int,
     val title: String,
@@ -23,6 +29,7 @@ data class Movie(
     val genres: List<String> = emptyList(),
     val trailerUrl: String? = null,
     val cast: List<CastMember> = emptyList(),
+    val subtitles: List<Subtitle> = emptyList(),
     val year: String? = null,
     val season: Int? = null,
     val episode: Int? = null,
@@ -33,5 +40,6 @@ data class Movie(
     val isWatchLater: Boolean = false,
     val isWatching: Boolean = false,
     val isSaved: Boolean = false,
-    val isFinished: Boolean = false
+    val isFinished: Boolean = false,
+    val createdAt: Long = System.currentTimeMillis()
 )

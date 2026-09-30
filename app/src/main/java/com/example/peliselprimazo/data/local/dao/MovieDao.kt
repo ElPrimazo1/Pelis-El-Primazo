@@ -18,6 +18,9 @@ interface MovieDao {
 
     @Query("SELECT * FROM movies WHERE id = :id")
     suspend fun getMovieById(id: Int): MovieEntity?
+
+    @Query("SELECT * FROM movies WHERE id = :id")
+    fun getMovieFlowById(id: Int): Flow<MovieEntity?>
     
     @Query("SELECT * FROM movies WHERE isSaved = 1")
     suspend fun getSavedMoviesSync(): List<MovieEntity>

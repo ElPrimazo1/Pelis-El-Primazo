@@ -32,5 +32,6 @@ data class MovieEntity(
     val lastPosition: Long = 0L,
     val totalDuration: Long = 0L,
     val timestamp: Long = System.currentTimeMillis(),
-    val lastUpdated: Long = System.currentTimeMillis()
+    val lastUpdated: Long = System.currentTimeMillis(),
+    val createdAt: Long = System.currentTimeMillis()
 )
