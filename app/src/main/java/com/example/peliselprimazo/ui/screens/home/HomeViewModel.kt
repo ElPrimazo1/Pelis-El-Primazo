@@ -12,8 +12,10 @@ import com.example.peliselprimazo.domain.model.Movie
 import com.example.peliselprimazo.domain.repository.MovieRepository
 import com.example.peliselprimazo.domain.usecase.GetUpdateConfigUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 @HiltViewModel
@@ -168,8 +170,10 @@ class HomeViewModel @Inject constructor(
         updateManager.downloadAndInstall(url)
     }
 
-    fun showRewardedVideo(activity: Activity, placementName: String? = null, onReward: () -> Unit) {
-        adsManager.showRewardedVideo(activity, placementName, onReward)
+    fun showRewardedVideo(activity: Activity, onReward: () -> Unit) {
+        adsManager.showRewardedVideo(activity) { success ->
+            if (success) onReward()
+        }
     }
 
     fun launchTestSuite(activity: Activity) {
@@ -201,7 +205,9 @@ class HomeViewModel @Inject constructor(
             _isPreloading.value = true
             try {
                 val extractor = extractorFactory.getExtractor(firstLink.serverName)
-                val videoUrl = extractor.extract(firstLink.fileId, repository)
+                val (videoUrl, _) = withContext(Dispatchers.IO) {
+                    extractor.extract(firstLink.fileId, repository)
+                }
                 if (!videoUrl.isNullOrBlank()) {
                     onReady(videoUrl)
                 } else {

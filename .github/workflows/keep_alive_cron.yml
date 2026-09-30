@@ -1,0 +1,29 @@
+name: Keep-Alive Streamtape Catalog
+
+on:
+  schedule:
+    # Se ejecuta automáticamente a las 00:00 UTC el día 1 de cada mes
+    - cron: '0 0 1 * *'
+  # Permite ejecutar el script manualmente desde GitHub cuando quieras probarlo
+  workflow_dispatch:
+
+jobs:
+  ping-streamtape:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Clonar código fuente
+      uses: actions/checkout@v3
+
+    - name: Configurar Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
+
+    - name: Instalar dependencias
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests
+
+    - name: Ejecutar script de renovación
+      run: python keep_alive.py

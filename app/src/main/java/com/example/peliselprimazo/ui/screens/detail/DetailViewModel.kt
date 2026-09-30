@@ -10,8 +10,10 @@ import com.example.peliselprimazo.data.extractor.StreamExtractorFactory
 import com.example.peliselprimazo.domain.model.Movie
 import com.example.peliselprimazo.domain.repository.MovieRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 @HiltViewModel
@@ -73,9 +75,11 @@ class DetailViewModel @Inject constructor(
         }
     }
 
-    // Actualizado: Ahora acepta placementName para Unity Ads
+    // Corregido: Ajustado a la nueva firma de AdsManager y callback booleano
     fun showRewardedVideo(activity: Activity, placementName: String? = null, onReward: () -> Unit) {
-        adsManager.showRewardedVideo(activity, placementName, onReward)
+        adsManager.showRewardedVideo(activity, placementName) { success ->
+            if (success) onReward()
+        }
     }
 
     fun prepareAndPlay(
@@ -87,7 +91,11 @@ class DetailViewModel @Inject constructor(
             _preloadingVideo.value = true
             try {
                 val extractor = extractorFactory.getExtractor(server)
-                val videoUrl = extractor.extract(fileId, repository)
+                // Corregido: Destructuración del par (URL, Headers) devuelto por el extractor
+                val (videoUrl, _) = withContext(Dispatchers.IO) {
+                    extractor.extract(fileId, repository)
+                }
+                
                 if (!videoUrl.isNullOrBlank()) {
                     Log.d(tag, "Video extraído correctamente. Pasando al reproductor.")
                     onReady(videoUrl, null)

@@ -3,24 +3,18 @@ package com.example.peliselprimazo.ui.screens.player
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.pm.ActivityInfo
-import android.graphics.Bitmap
-import android.os.Handler
-import android.os.Looper
-import android.os.Message
-import android.view.View
 import android.view.ViewGroup
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
-import android.webkit.WebView
-import android.webkit.WebViewClient
+import android.widget.FrameLayout
 import androidx.activity.compose.BackHandler
+import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Error
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -29,13 +23,24 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.media3.common.MediaItem
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.ui.PlayerView
 import com.example.peliselprimazo.data.AdsManager
 import com.example.peliselprimazo.ui.components.ParticleLoading
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
 @SuppressLint("SourceLockedOrientationActivity")
 @Composable
@@ -80,221 +85,187 @@ fun PlayerScreen(
     ) {
         when (val state = uiState) {
             is PlayerUiState.Loading -> {
-                Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
-                    ParticleLoading(size = 200.dp)
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    ParticleLoading(size = 180.dp)
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Text(
+                        "Extrayendo enlace directo...",
+                        color = Color.White.copy(alpha = 0.7f),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
             is PlayerUiState.Success -> {
                 Box(modifier = Modifier.fillMaxSize()) {
-                    WebPlayer(
-                        url = state.videoUrl, 
-                        onBack = onBack,
-                        onNext = state.nextLink?.let { next ->
-                            {
-                                activity?.let { act ->
-                                    adsManager.showRewardedVideo(act) {
-                                        viewModel.loadVideo(next.serverName, next.fileId, state.movie.id)
-                                    }
-                                } ?: viewModel.loadVideo(next.serverName, next.fileId, state.movie.id)
+                    NativePlayer(
+                        videoUrl = state.videoUrl,
+                        headers = state.headers,
+                        resumePosition = state.resumePosition,
+                        onProgressUpdate = { pos, dur -> viewModel.updateProgress(pos, dur) }
+                    )
+                    
+                    // Capa de Controles Superpuestos (Botones de navegación)
+                    Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                        IconButton(
+                            onClick = onBack,
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .size(44.dp)
+                                .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                        ) { 
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Volver", tint = Color.White) 
+                        }
+
+                        if (state.nextLink != null) {
+                            IconButton(
+                                onClick = {
+                                    activity?.let { act ->
+                                        adsManager.showRewardedVideo(act) {
+                                            viewModel.loadVideo(state.nextLink.serverName, state.nextLink.fileId, state.movie.id)
+                                        }
+                                    } ?: viewModel.loadVideo(state.nextLink.serverName, state.nextLink.fileId, state.movie.id)
+                                },
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .size(44.dp)
+                                    .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                            ) { 
+                                Icon(Icons.Rounded.SkipNext, "Siguiente", tint = Color.White) 
                             }
                         }
-                    )
+                    }
                     
                     if (state.isChangingEpisode) {
                         Box(
                             modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.7f)),
                             contentAlignment = Alignment.Center
                         ) {
-                            ParticleLoading(size = 200.dp)
+                            ParticleLoading(size = 150.dp)
                         }
                     }
                 }
             }
             is PlayerUiState.Error -> {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Rounded.Error, null, tint = Color.Red, modifier = Modifier.size(48.dp))
-                    Text(state.message, color = Color.White, modifier = Modifier.padding(16.dp))
-                    Button(onClick = onBack) { Text("Volver") }
+                Surface(
+                    modifier = Modifier.padding(24.dp),
+                    color = Color(0xFF1A1A1A),
+                    shape = RoundedCornerShape(24.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(Icons.Rounded.Error, null, tint = Color.Red, modifier = Modifier.size(60.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "¡Ops! Algo salió mal",
+                            color = Color.White,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Black
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = state.message,
+                            color = Color.Gray,
+                            textAlign = TextAlign.Center,
+                            style = MaterialTheme.typography.bodyMedium,
+                            lineHeight = 20.sp
+                        )
+                        Spacer(modifier = Modifier.height(32.dp))
+                        
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            if (state.canRetry) {
+                                Button(
+                                    onClick = { viewModel.retry() },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Icon(Icons.Rounded.Refresh, null, tint = Color.Black)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Reintentar", color = Color.Black, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            
+                            OutlinedButton(
+                                onClick = onBack,
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("Cerrar", color = Color.White)
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 }
 
-@SuppressLint("SetJavaScriptEnabled")
+@OptIn(UnstableApi::class)
 @Composable
-fun WebPlayer(
-    url: String, 
-    onBack: () -> Unit,
-    onNext: (() -> Unit)? = null
+fun NativePlayer(
+    videoUrl: String,
+    headers: Map<String, String>,
+    resumePosition: Long,
+    onProgressUpdate: (Long, Long) -> Unit
 ) {
-    var isWebViewLoading by remember { mutableStateOf(true) }
+    val context = LocalContext.current
+    
+    // Configuración robusta de ExoPlayer con Headers y User-Agent real
+    val exoPlayer = remember(videoUrl) {
+        val browserUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        
+        val dataSourceFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent(browserUserAgent)
+            .setDefaultRequestProperties(headers)
+            .setAllowCrossProtocolRedirects(true)
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-    ) {
-        AndroidView(
-            factory = { context ->
-                WebView(context).apply {
-                    visibility = View.INVISIBLE
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                    )
-                    
-                    settings.apply {
-                        javaScriptEnabled = true
-                        domStorageEnabled = true
-                        databaseEnabled = true
-                        
-                        // Configuración para el control de ventanas
-                        setSupportMultipleWindows(true) 
-                        javaScriptCanOpenWindowsAutomatically = false
-                        mediaPlaybackRequiresUserGesture = false
-                    }
-
-                    webViewClient = object : WebViewClient() {
-                        override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                            super.onPageStarted(view, url, favicon)
-                            isWebViewLoading = true
-                            view?.visibility = View.INVISIBLE
-                        }
-
-                        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                            val uri = request?.url ?: return true
-                            val urlString = uri.toString()
-                            
-                            // 1. Bloqueo de esquemas no estándar (publicidad que intenta abrir apps)
-                            if (uri.scheme != "http" && uri.scheme != "https") return true
-                            
-                            // 2. Control de navegación: Solo permitir Streamtape y sus recursos
-                            val allowedHosts = listOf("streamtape.com", "streamtape.to", "tapecontent.net")
-                            val isAllowedHost = allowedHosts.any { uri.host?.contains(it) == true }
-                            
-                            // Recursos necesarios para la carga del reproductor
-                            val isResource = urlString.contains("static") || 
-                                            urlString.contains("video") || 
-                                            urlString.contains(".mp4")
-                            
-                            // Si no es un host permitido ni un recurso, bloqueamos (true)
-                            return !(isAllowedHost || isResource)
-                        }
-
-                        override fun shouldInterceptRequest(
-                            view: WebView?,
-                            request: WebResourceRequest?
-                        ): WebResourceResponse? {
-                            val requestUrl = request?.url?.toString()?.lowercase() ?: return null
-                            
-                            // Lista de dominios y patrones conocidos de redes publicitarias
-                            val adDomains = listOf(
-                                "doubleclick.net", "googlesyndication.com", "googleadservices.com",
-                                "popads.net", "adnxs.com", "adsystem.com", "adservice.google",
-                                "onclickads.net", "taboola.com", "outbrain.com", "histats.com",
-                                "a.bestcontent", "traffichunt.com", "juicyads.com", "exoclick.com",
-                                "propellerads.com", "yandex.ru", "google-analytics.com",
-                                "scorecardresearch.com", "quantserve.com", "ad-delivery",
-                                "mads.amazon", "serving-sys.com", "flashtalking.com", "casalemedia.com"
-                            )
-
-                            // Si la URL coincide con algún patrón publicitario, interceptamos y devolvemos una respuesta vacía
-                            if (adDomains.any { requestUrl.contains(it) }) {
-                                return WebResourceResponse("text/plain", "UTF-8", null)
-                            }
-
-                            return super.shouldInterceptRequest(view, request)
-                        }
-
-                        override fun onPageFinished(view: WebView?, url: String?) {
-                            super.onPageFinished(view, url)
-                            
-                            // Inyección de script JS para detectar y ocultar divs superpuestos (overlays/popups)
-                            val jsCode = """
-                                (function() {
-                                    function hideAds() {
-                                        var elements = document.getElementsByTagName('*');
-                                        for (var i = 0; i < elements.length; i++) {
-                                            var el = elements[i];
-                                            var style = window.getComputedStyle(el);
-                                            
-                                            if (style.position === 'fixed' || style.position === 'absolute') {
-                                                var zIndex = parseInt(style.zIndex);
-                                                if (zIndex > 100 || el.id === 'popads' || el.className.indexOf('popup') !== -1) {
-                                                    if (!el.contains(document.querySelector('video'))) {
-                                                        el.style.display = 'none';
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    hideAds();
-                                    setInterval(hideAds, 1000);
-                                })();
-                            """.trimIndent()
-                            
-                            view?.evaluateJavascript(jsCode) {
-                                // Implementación del Handler para retrasar la visibilidad 500ms
-                                Handler(Looper.getMainLooper()).postDelayed({
-                                    view.visibility = View.VISIBLE
-                                    isWebViewLoading = false
-                                }, 500)
-                            }
-                        }
-                    }
-
-                    webChromeClient = object : WebChromeClient() {
-                        override fun onCreateWindow(
-                            view: WebView?,
-                            isDialog: Boolean,
-                            isUserGesture: Boolean,
-                            resultMsg: Message?
-                        ): Boolean {
-                            return false
-                        }
-                    }
+        ExoPlayer.Builder(context)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
+            .build().apply {
+                val mediaItem = MediaItem.Builder()
+                    .setUri(videoUrl)
+                    .build()
+                
+                setMediaItem(mediaItem)
+                prepare()
+                if (resumePosition > 0) {
+                    seekTo(resumePosition)
                 }
-            },
-            update = { webView ->
-                if (webView.url != url) {
-                    webView.loadUrl(url)
-                }
-            },
-            modifier = Modifier.fillMaxSize()
-        )
-
-        if (isWebViewLoading) {
-            Box(
-                modifier = Modifier.fillMaxSize().background(Color.Black),
-                contentAlignment = Alignment.Center
-            ) {
-                ParticleLoading(size = 150.dp)
+                playWhenReady = true
             }
-        }
+    }
 
-        IconButton(
-            onClick = onBack,
-            modifier = Modifier
-                .padding(16.dp)
-                .align(Alignment.TopStart)
-                .size(44.dp)
-                .background(Color.Black.copy(alpha = 0.5f), CircleShape)
-        ) { 
-            Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Volver", tint = Color.White) 
-        }
-
-        if (onNext != null) {
-            IconButton(
-                onClick = onNext,
-                modifier = Modifier
-                    .padding(16.dp)
-                    .align(Alignment.TopEnd)
-                    .size(44.dp)
-                    .background(Color.Black.copy(alpha = 0.5f), CircleShape)
-            ) { 
-                Icon(Icons.Rounded.SkipNext, "Siguiente", tint = Color.White) 
+    // Actualización de progreso
+    LaunchedEffect(exoPlayer) {
+        while (isActive) {
+            if (exoPlayer.isPlaying) {
+                onProgressUpdate(exoPlayer.currentPosition, exoPlayer.duration)
             }
+            delay(8000)
         }
     }
+
+    DisposableEffect(exoPlayer) {
+        onDispose {
+            exoPlayer.release()
+        }
+    }
+
+    AndroidView(
+        factory = {
+            PlayerView(it).apply {
+                player = exoPlayer
+                useController = true
+                layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+                setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
+            }
+        },
+        modifier = Modifier.fillMaxSize()
+    )
 }

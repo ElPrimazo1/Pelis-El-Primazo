@@ -22,7 +22,7 @@ class AdsManager @Inject constructor() {
     private val _isRewardedVideoReady = MutableStateFlow(false)
     val isRewardedVideoReady = _isRewardedVideoReady.asStateFlow()
 
-    private var onRewardCallback: (() -> Unit)? = null
+    private var onRewardCallback: ((Boolean) -> Unit)? = null
 
     fun init(activity: Activity) {
         val appKey = BuildConfig.IRONSOURCE_APP_KEY.ifEmpty { "2852f0ccd" }
@@ -40,7 +40,6 @@ class AdsManager @Inject constructor() {
 
         IronSource.setLevelPlayRewardedVideoListener(object : LevelPlayRewardedVideoListener {
             override fun onAdAvailable(adInfo: AdInfo) {
-                Log.d(tag, "Subasta terminada: Ganó ${adInfo.adNetwork}")
                 _isRewardedVideoReady.value = true
             }
             override fun onAdUnavailable() { 
@@ -48,22 +47,30 @@ class AdsManager @Inject constructor() {
             }
             override fun onAdOpened(adInfo: AdInfo) {}
             override fun onAdClosed(adInfo: AdInfo) {}
+            
             override fun onAdRewarded(placement: Placement, adInfo: AdInfo) {
-                onRewardCallback?.invoke()
+                Log.d(tag, "Usuario recompensado")
+                onRewardCallback?.invoke(true)
                 onRewardCallback = null
             }
+            
             override fun onAdShowFailed(error: IronSourceError, adInfo: AdInfo) {
-                onRewardCallback?.invoke()
+                Log.e(tag, "Error al mostrar anuncio: ${error.errorMessage}")
+                onRewardCallback?.invoke(true)
                 onRewardCallback = null
             }
+            
             override fun onAdClicked(placement: Placement, adInfo: AdInfo) {}
         })
 
         IronSource.init(activity, appKey, IronSource.AD_UNIT.REWARDED_VIDEO)
     }
 
-    fun showRewardedVideo(activity: Activity, placementName: String? = null, onReward: () -> Unit) {
-        this.onRewardCallback = onReward
+    /**
+     * Muestra el anuncio recompensado.
+     */
+    fun showRewardedVideo(activity: Activity, placementName: String? = null, onResult: (Boolean) -> Unit) {
+        this.onRewardCallback = onResult
         if (IronSource.isRewardedVideoAvailable()) {
             if (!placementName.isNullOrBlank()) {
                 IronSource.showRewardedVideo(placementName)
@@ -71,8 +78,8 @@ class AdsManager @Inject constructor() {
                 IronSource.showRewardedVideo()
             }
         } else {
-            Log.d(tag, "Anuncio no disponible en este momento.")
-            onReward()
+            Log.d(tag, "Anuncio no disponible localmente.")
+            onResult(true)
         }
     }
 

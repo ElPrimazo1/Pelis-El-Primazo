@@ -1,0 +1,4 @@
+# Añade aquí tus enlaces de Streamtape, uno por línea
+# Ejemplo:
+# https://streamtape.com/v/EJEMPLO1/
+# https://streamtape.com/v/EJEMPLO2/
