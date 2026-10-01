@@ -185,7 +185,12 @@ fun HomeScreen(
                 modifier = Modifier.align(Alignment.BottomCenter),
                 categories = categories,
                 currentPage = pagerState.currentPage,
-                onPageSelected = { index -> coroutineScope.launch { pagerState.animateScrollToPage(index) } }
+                onPageSelected = { index -> 
+                    coroutineScope.launch { 
+                        // Cambio a scrollToPage para navegación instantánea sin lag visual
+                        pagerState.scrollToPage(index) 
+                    } 
+                }
             )
         }
 
