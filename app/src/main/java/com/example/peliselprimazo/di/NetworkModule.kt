@@ -84,6 +84,17 @@ object NetworkModule {
 
     @Provides
     @Singleton
+    @Named("JikanRetrofit")
+    fun provideJikanRetrofit(okHttpClient: OkHttpClient): Retrofit {
+        return Retrofit.Builder()
+            .baseUrl(JikanApi.BASE_URL)
+            .client(okHttpClient)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+    }
+
+    @Provides
+    @Singleton
     fun provideStreamtapeApi(@Named("StreamtapeRetrofit") retrofit: Retrofit): StreamtapeApi {
         return retrofit.create(StreamtapeApi::class.java)
     }
@@ -92,5 +103,11 @@ object NetworkModule {
     @Singleton
     fun provideTmdbApi(@Named("TmdbRetrofit") retrofit: Retrofit): TmdbApi {
         return retrofit.create(TmdbApi::class.java)
+    }
+
+    @Provides
+    @Singleton
+    fun provideJikanApi(@Named("JikanRetrofit") retrofit: Retrofit): JikanApi {
+        return retrofit.create(JikanApi::class.java)
     }
 }

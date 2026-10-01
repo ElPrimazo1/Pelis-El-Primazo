@@ -188,8 +188,11 @@ class HomeViewModel @Inject constructor(
             try {
                 withContext(Dispatchers.IO) { repository.refreshContent() }
                 _error.value = null
+            } catch (e: java.net.UnknownHostException) {
+                _error.value = "Error de conexión: Revisa tu internet"
             } catch (e: Exception) {
-                _error.value = "Error al actualizar"
+                _error.value = "Error al actualizar contenido"
+                Log.e("HomeVM", "Sync error", e)
             } finally {
                 _isLoading.value = false
                 _isRefreshing.value = false

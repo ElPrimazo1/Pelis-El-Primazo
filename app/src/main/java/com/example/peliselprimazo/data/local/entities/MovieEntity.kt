@@ -9,6 +9,7 @@ import com.example.peliselprimazo.domain.model.ServerLink
 data class MovieEntity(
     @PrimaryKey val id: Int,
     val title: String,
+    val originalTitle: String? = null,
     val overview: String,
     val posterUrl: String?,
     val backdropUrl: String?,

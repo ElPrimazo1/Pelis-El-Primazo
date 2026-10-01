@@ -9,6 +9,7 @@ data class TmdbSearchResponse<T>(
 data class TmdbMovieResult(
     @SerializedName("id") val id: Int,
     @SerializedName("title") val title: String,
+    @SerializedName("original_title") val originalTitle: String?,
     @SerializedName("overview") val overview: String?,
     @SerializedName("poster_path") val posterPath: String?,
     @SerializedName("backdrop_path") val backdropPath: String?,
@@ -19,6 +20,7 @@ data class TmdbMovieResult(
 data class TmdbTvResult(
     @SerializedName("id") val id: Int,
     @SerializedName("name") val name: String,
+    @SerializedName("original_name") val originalName: String?,
     @SerializedName("overview") val overview: String?,
     @SerializedName("poster_path") val posterPath: String?,
     @SerializedName("backdrop_path") val backdropPath: String?,
@@ -29,6 +31,7 @@ data class TmdbTvResult(
 data class TmdbMovieDetail(
     @SerializedName("id") val id: Int,
     @SerializedName("title") val title: String,
+    @SerializedName("original_title") val originalTitle: String?,
     @SerializedName("overview") val overview: String,
     @SerializedName("poster_path") val posterPath: String?,
     @SerializedName("backdrop_path") val backdropPath: String?,
@@ -43,6 +46,7 @@ data class TmdbMovieDetail(
 data class TmdbTvDetail(
     @SerializedName("id") val id: Int,
     @SerializedName("name") val name: String,
+    @SerializedName("original_name") val originalName: String?,
     @SerializedName("overview") val overview: String,
     @SerializedName("poster_path") val posterPath: String?,
     @SerializedName("backdrop_path") val backdropPath: String?,

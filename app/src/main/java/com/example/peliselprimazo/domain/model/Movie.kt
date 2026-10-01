@@ -19,6 +19,7 @@ data class Subtitle(
 data class Movie(
     val id: Int,
     val title: String,
+    val originalTitle: String? = null,
     val overview: String = "",
     val posterUrl: String? = null,
     val backdropUrl: String? = null,

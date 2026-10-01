@@ -11,6 +11,7 @@ import com.example.peliselprimazo.data.local.dao.MovieDao
 import com.example.peliselprimazo.data.local.dao.SearchHistoryDao
 import com.example.peliselprimazo.data.local.entities.MovieEntity
 import com.example.peliselprimazo.data.local.entities.SearchHistoryEntity
+import com.example.peliselprimazo.data.remote.JikanApi
 import com.example.peliselprimazo.data.remote.StreamtapeApi
 import com.example.peliselprimazo.data.remote.TmdbApi
 import com.example.peliselprimazo.domain.model.CastMember
@@ -36,17 +37,22 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.regex.Pattern
 
+enum class FolderCategory { MOVIES, SERIES, ANIME, UNKNOWN }
+
 data class InternalFileInfo(
     val cleanTitle: String,
     val year: String?,
     val season: Int?,
     val episode: Int?,
     val isTv: Boolean,
-    val isAnime: Boolean
+    val isAnime: Boolean,
+    val language: String? = null,
+    val category: FolderCategory = FolderCategory.UNKNOWN
 )
 
 data class TmdbData(
     val title: String,
+    val originalTitle: String?,
     val overview: String,
     val posterUrl: String?,
     val backdropUrl: String?,
@@ -76,6 +82,7 @@ data class RemoteWatchingProgress(
 class MovieRepositoryImpl @Inject constructor(
     private val streamtapeApi: StreamtapeApi,
     private val tmdbApi: TmdbApi,
+    private val jikanApi: JikanApi,
     private val movieDao: MovieDao,
     private val searchHistoryDao: SearchHistoryDao,
     private val firebaseAuth: FirebaseAuth,
@@ -88,6 +95,7 @@ class MovieRepositoryImpl @Inject constructor(
     private val tmdbApiKey = BuildConfig.TMDB_API_KEY
 
     private val tmdbSemaphore = Semaphore(3)
+    private val jikanSemaphore = Semaphore(1) // Más restrictivo para Jikan (3 req/seg max)
     
     private val _currentUser = MutableStateFlow<User?>(null)
     private val _avatarOverride = MutableStateFlow<String?>(null)
@@ -161,9 +169,13 @@ class MovieRepositoryImpl @Inject constructor(
                     return@withContext
                 }
 
-                val parsedItems = allFiles.map { pair ->
-                    val info = parseFileName(pair.first)
-                    info to pair.second.copy(season = info.season, episode = info.episode)
+                val parsedItems = allFiles.map { (fileName, serverLink, category) ->
+                    val info = parseFileName(fileName, category)
+                    info to serverLink.copy(
+                        season = info.season, 
+                        episode = info.episode,
+                        language = info.language
+                    )
                 }
 
                 val grouped = parsedItems.groupBy { pair ->
@@ -180,10 +192,26 @@ class MovieRepositoryImpl @Inject constructor(
 
                         val existing = movieDao.getMovieById(id)
                         
-                        val tmdbData = tmdbSemaphore.withPermit {
-                            try {
-                                if (tmdbApiKey.isNotBlank()) fetchTmdbData(primaryInfo) else null
-                            } catch (_: Exception) { null }
+                        // Búsqueda de metadata con fallback y optimización
+                        var metaData: TmdbData? = null
+                        val needsMetadata = existing == null || existing.posterUrl.isNullOrBlank() || existing.overview == "Contenido disponible."
+
+                        if (needsMetadata) {
+                            if (primaryInfo.isAnime || primaryInfo.category == FolderCategory.ANIME) {
+                                metaData = jikanSemaphore.withPermit {
+                                    try { fetchJikanData(primaryInfo) } catch (e: Exception) { 
+                                        Log.e("Sync", "Jikan error for ${primaryInfo.cleanTitle}: ${e.message}")
+                                        null 
+                                    }
+                                }
+                            }
+
+                            // Si Jikan no encontró nada (o no es anime), probamos con TMDB
+                            if (metaData == null) {
+                                metaData = tmdbSemaphore.withPermit {
+                                    try { if (tmdbApiKey.isNotBlank()) fetchTmdbData(primaryInfo) else null } catch (_: Exception) { null }
+                                }
+                            }
                         }
 
                         val isLiked = if (remoteData != null) remoteData.liked.contains(id) else existing?.isLiked ?: false
@@ -197,13 +225,9 @@ class MovieRepositoryImpl @Inject constructor(
                         val totalDur = remoteProgress?.duration ?: existing?.totalDuration ?: 0L
                         val timestamp = remoteProgress?.timestamp ?: existing?.timestamp ?: System.currentTimeMillis()
 
-                        // Logic for notifications and createdAt
-                        val isNewEpisode = existing != null && (primaryInfo.isTv || primaryInfo.isAnime) && 
-                                           allLinks.size > (existing.serverLinks.size)
-                        
-                        if (isNewEpisode && existing!!.isWatching) {
+                        if (existing != null && (primaryInfo.isTv || primaryInfo.isAnime) && allLinks.size > existing.serverLinks.size && existing.isWatching) {
                             notificationHelper.showNewEpisodeNotification(
-                                tmdbData?.title ?: primaryInfo.cleanTitle.capitalizeWords(),
+                                metaData?.title ?: primaryInfo.cleanTitle.capitalizeWords(),
                                 primaryInfo.season,
                                 primaryInfo.episode,
                                 id
@@ -211,29 +235,35 @@ class MovieRepositoryImpl @Inject constructor(
                         }
 
                         val createdAt = if (existing == null) syncStartTime else existing.createdAt
-                        val lastUpdated = if (isNewEpisode) syncStartTime else (existing?.lastUpdated ?: syncStartTime)
+                        val lastUpdated = syncStartTime
+
+                        val finalTitle = when {
+                            metaData != null -> metaData.title
+                            else -> primaryInfo.cleanTitle.capitalizeWords()
+                        }
 
                         val entity = MovieEntity(
                             id = id,
-                            title = tmdbData?.title ?: primaryInfo.cleanTitle.capitalizeWords(),
-                            overview = tmdbData?.overview ?: existing?.overview ?: "Contenido disponible.",
-                            posterUrl = tmdbData?.posterUrl ?: existing?.posterUrl,
-                            backdropUrl = tmdbData?.backdropUrl ?: existing?.backdropUrl,
-                            releaseDate = tmdbData?.releaseDate ?: primaryInfo.year ?: "Desconocido",
-                            rating = tmdbData?.rating ?: existing?.rating ?: 0.0,
+                            title = finalTitle,
+                            originalTitle = metaData?.originalTitle,
+                            overview = metaData?.overview ?: existing?.overview ?: "Contenido disponible.",
+                            posterUrl = metaData?.posterUrl ?: existing?.posterUrl,
+                            backdropUrl = metaData?.backdropUrl ?: existing?.backdropUrl,
+                            releaseDate = metaData?.releaseDate ?: primaryInfo.year ?: "Desconocido",
+                            rating = metaData?.rating ?: existing?.rating ?: 0.0,
                             serverLinks = allLinks,
                             contentType = when {
                                 primaryInfo.isAnime -> ContentType.ANIME.name
                                 primaryInfo.isTv -> ContentType.TV.name
                                 else -> ContentType.MOVIE.name
                             },
-                            genres = tmdbData?.genres ?: existing?.genres ?: emptyList(),
-                            year = tmdbData?.releaseDate?.take(4) ?: primaryInfo.year,
-                            trailerUrl = tmdbData?.trailerUrl ?: existing?.trailerUrl,
-                            cast = tmdbData?.cast ?: existing?.cast ?: emptyList(),
+                            genres = metaData?.genres ?: existing?.genres ?: emptyList(),
+                            year = metaData?.releaseDate?.take(4) ?: primaryInfo.year,
+                            trailerUrl = metaData?.trailerUrl ?: existing?.trailerUrl,
+                            cast = metaData?.cast ?: existing?.cast ?: emptyList(),
                             season = primaryInfo.season,
                             episode = primaryInfo.episode,
-                            duration = tmdbData?.duration ?: existing?.duration,
+                            duration = metaData?.duration ?: existing?.duration,
                             isLiked = isLiked,
                             isSaved = isSaved,
                             isWatchLater = isWatchLater,
@@ -257,20 +287,34 @@ class MovieRepositoryImpl @Inject constructor(
                 }
             } catch (e: Exception) {
                 Log.e("PrimazoSync", "Error en actualización: ${e.message}")
+                if (e is java.net.UnknownHostException || e is java.net.ConnectException) throw e
             }
         }
     }
 
-    private fun parseFileName(fileName: String): InternalFileInfo {
+    private fun parseFileName(fileName: String, folderCategory: FolderCategory): InternalFileInfo {
         val nameWithoutExt = fileName.replace(Regex("\\.(mp4|mkv|avi|mov|wmv|flv|webm|m3u8)$", RegexOption.IGNORE_CASE), "")
-        var name = nameWithoutExt.replace(Regex("[._\\-/]"), " ")
+        val isAnime = folderCategory == FolderCategory.ANIME || fileName.lowercase().contains("anime") || fileName.contains("[Anime]")
+
+        var cleanTitle = nameWithoutExt.replace(Regex("[._\\-/()\\[\\]{}]"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
+        val languages = listOf("latino", "español", "castellano", "ingles", "english", "frances", "french", "japones", "japanese")
+        var foundLanguage: String? = null
+        languages.forEach { lang ->
+            if (cleanTitle.lowercase().contains(Regex("\\b$lang\\b"))) {
+                foundLanguage = lang.replaceFirstChar { it.uppercase() }
+            }
+        }
 
         val yearPattern = Pattern.compile("\\b(19|20)\\d{2}\\b")
-        val yearMatcher = yearPattern.matcher(name)
+        val yearMatcher = yearPattern.matcher(cleanTitle)
         val year = if (yearMatcher.find()) yearMatcher.group() else null
+        if (year != null) cleanTitle = cleanTitle.replace(year, "")
 
-        val sePattern = Pattern.compile("(?i)S(\\d{1,2})E(\\d{1,3})|(\\d{1,2})x(\\d{1,3})")
-        val seMatcher = sePattern.matcher(name)
+        val sePattern = Pattern.compile("(?i)S(\\d{1,2})E(\\d{1,3})|(\\d{1,2})x(\\d{1,3})|Ep\\s?(\\d{1,3})")
+        val seMatcher = sePattern.matcher(cleanTitle)
         var season: Int? = null
         var episode: Int? = null
         var seMatch: String? = null
@@ -278,56 +322,120 @@ class MovieRepositoryImpl @Inject constructor(
         if (seMatcher.find()) {
             seMatch = seMatcher.group()
             season = seMatcher.group(1)?.toIntOrNull() ?: seMatcher.group(3)?.toIntOrNull()
-            episode = seMatcher.group(2)?.toIntOrNull() ?: seMatcher.group(4)?.toIntOrNull()
+            episode = seMatcher.group(2)?.toIntOrNull() ?: seMatcher.group(4)?.toIntOrNull() ?: seMatcher.group(5)?.toIntOrNull()
         }
 
-        val isAnime = name.lowercase().contains("anime")
-        val isTv = season != null || name.lowercase().contains("tv") || isAnime
-
-        var cleanTitle = name
-        
-        if (seMatch != null) {
-            val index = cleanTitle.indexOf(seMatch)
-            if (index != -1) {
-                cleanTitle = cleanTitle.substring(0, index)
+        if (episode == null) {
+            val epPattern = Pattern.compile("\\s(\\d{1,4})$")
+            val epMatcher = epPattern.matcher(cleanTitle)
+            if (epMatcher.find()) {
+                episode = epMatcher.group(1).toIntOrNull()
+                seMatch = epMatcher.group()
             }
         }
-        
-        if (year != null) {
-            cleanTitle = cleanTitle.replace(year, "")
+
+        if (seMatch != null) {
+            val idx = cleanTitle.indexOf(seMatch)
+            if (idx != -1) cleanTitle = cleanTitle.substring(0, idx)
         }
 
         val noiseTags = listOf(
             "1080p", "720p", "480p", "h264", "h265", "x264", "x265", 
             "bluray", "webrip", "latino", "español", "castellano", "dual", 
-            "sub", "subs", "subtitulado", "multi", "hdrip", "dvdrip", "remux", "streamtape"
+            "sub", "subs", "subtitulado", "multi", "hdrip", "dvdrip", "remux", "streamtape",
+            "ingles", "english", "frances", "french", "japones", "japanese", "anime"
         )
         noiseTags.forEach { tag ->
             cleanTitle = cleanTitle.replace(Regex("(?i)\\b$tag\\b"), "")
         }
 
-        cleanTitle = cleanTitle.replace(Regex("[()\\[\\]{}]"), " ")
-            .replace(Regex("\\s+"), " ")
-            .trim()
-            
-        if (cleanTitle.isEmpty()) cleanTitle = nameWithoutExt.trim()
+        cleanTitle = cleanTitle.replace(Regex("\\s+"), " ").trim()
+        if (cleanTitle.isEmpty()) cleanTitle = nameWithoutExt
 
-        return InternalFileInfo(cleanTitle, year, season, episode, isTv, isAnime)
+        val isTv = folderCategory == FolderCategory.SERIES || season != null || fileName.lowercase().contains("tv") || isAnime
+
+        return InternalFileInfo(cleanTitle, year, season, episode, isTv, isAnime, foundLanguage, folderCategory)
+    }
+
+    private suspend fun fetchJikanData(info: InternalFileInfo): TmdbData? {
+        return try {
+            var query = info.cleanTitle.trim()
+            if (query.length < 3) return null
+            
+            // Jikan rate limit: 3 requests per second max. Usamos delay de 1s para seguridad.
+            delay(1000) 
+            
+            Log.d("Jikan", "Buscando metadata en Jikan para: $query")
+            var response = jikanApi.searchAnime(query)
+            var searchResult = response.data?.firstOrNull()
+
+            // Si no hay resultados, intentar una búsqueda más limpia (sin números al final)
+            if (searchResult == null) {
+                val cleanedQuery = query.replace(Regex("\\s\\d+$"), "").trim()
+                if (cleanedQuery != query && cleanedQuery.length >= 3) {
+                    delay(1000)
+                    Log.d("Jikan", "Reintentando Jikan con query limpia: $cleanedQuery")
+                    response = jikanApi.searchAnime(cleanedQuery)
+                    searchResult = response.data?.firstOrNull()
+                }
+            }
+            
+            if (searchResult == null || searchResult.id == null) {
+                Log.w("Jikan", "No se encontró metadata para: $query")
+                return null
+            }
+
+            // Obtener datos completos para asegurar portada y sinopsis según doc v4
+            delay(1000)
+            val fullResponse = jikanApi.getAnimeFull(searchResult.id)
+            val data = fullResponse.data ?: searchResult
+
+            Log.d("Jikan", "Datos encontrados: ${data.title} (ID: ${data.id})")
+            
+            // Mapeo exhaustivo de imágenes según doc v4
+            val poster = data.images?.webp?.largeImageUrl 
+                ?: data.images?.webp?.imageUrl 
+                ?: data.images?.jpg?.largeImageUrl 
+                ?: data.images?.jpg?.imageUrl
+
+            TmdbData(
+                title = data.title ?: data.titleEnglish ?: info.cleanTitle, // Prioridad al nombre original/romaji
+                originalTitle = data.titleEnglish ?: data.titleJapanese, // Guardamos el ingles como secundario
+                overview = data.synopsis ?: "Sinopsis no disponible en Jikan.",
+                posterUrl = poster,
+                backdropUrl = poster, 
+                releaseDate = data.year?.toString() ?: info.year ?: "Desconocido",
+                rating = data.score ?: 0.0,
+                genres = data.genres?.mapNotNull { it.name } ?: emptyList(),
+                trailerUrl = data.trailer?.url ?: data.trailer?.youtubeId?.let { "https://www.youtube.com/watch?v=$it" },
+                cast = emptyList(),
+                duration = data.duration
+            )
+        } catch (e: Exception) {
+            Log.e("Jikan", "Error crítico en búsqueda Jikan para ${info.cleanTitle}: ${e.message}")
+            null
+        }
     }
 
     private suspend fun fetchTmdbData(info: InternalFileInfo): TmdbData? {
         return try {
-            val id = if (info.isTv || info.isAnime) {
+            // Si tiene temporada/episodio o es anime/serie, buscar como TV en TMDB
+            val isTvSearch = info.isTv || info.category == FolderCategory.SERIES || info.category == FolderCategory.ANIME
+            
+            val id = if (isTvSearch) {
                 tmdbApi.searchTv(info.cleanTitle, info.year).results.firstOrNull()?.id
             } else {
                 tmdbApi.searchMovie(info.cleanTitle, info.year).results.firstOrNull()?.id
             } ?: return null
             
-            if (info.isTv || info.isAnime) {
+            if (isTvSearch) {
                 val details = tmdbApi.getTvDetails(id)
+                val isAnime = info.isAnime || info.category == FolderCategory.ANIME
+                
                 TmdbData(
-                    title = details.name,
-                    overview = details.overview,
+                    title = (if (isAnime) details.originalName else details.name) ?: info.cleanTitle,
+                    originalTitle = details.name,
+                    overview = details.overview ?: "Sinopsis no disponible.",
                     posterUrl = details.posterPath?.let { "https://image.tmdb.org/t/p/w500$it" },
                     backdropUrl = details.backdropPath?.let { "https://image.tmdb.org/t/p/w780$it" },
                     releaseDate = details.firstAirDate,
@@ -340,8 +448,9 @@ class MovieRepositoryImpl @Inject constructor(
             } else {
                 val details = tmdbApi.getMovieDetails(id)
                 TmdbData(
-                    title = details.title,
-                    overview = details.overview,
+                    title = details.title ?: info.cleanTitle,
+                    originalTitle = details.originalTitle,
+                    overview = details.overview ?: "Sinopsis no disponible.",
                     posterUrl = details.posterPath?.let { "https://image.tmdb.org/t/p/w500$it" },
                     backdropUrl = details.backdropPath?.let { "https://image.tmdb.org/t/p/w780$it" },
                     releaseDate = details.releaseDate,
@@ -353,7 +462,7 @@ class MovieRepositoryImpl @Inject constructor(
                 )
             }
         } catch (e: Exception) {
-            Log.e("TMDB", "Error fetching data for ${info.cleanTitle}: ${e.message}")
+            Log.e("TMDB", "Error en búsqueda TMDB para ${info.cleanTitle}: ${e.message}")
             null
         }
     }
@@ -390,36 +499,41 @@ class MovieRepositoryImpl @Inject constructor(
         return movieDao.getMovieById(id)?.toDomain()
     }
 
-    private suspend fun getStreamtapeFilesSafe(): List<Pair<String, ServerLink>> {
-        val results = mutableListOf<Pair<String, ServerLink>>()
-        val folderQueue = mutableListOf<Pair<String?, String?>>()
-        folderQueue.add(null to null)
+    private suspend fun getStreamtapeFilesSafe(): List<Triple<String, ServerLink, FolderCategory>> {
+        val results = mutableListOf<Triple<String, ServerLink, FolderCategory>>()
+        val folderQueue = mutableListOf<Triple<String?, String?, FolderCategory>>() 
+        folderQueue.add(Triple(null, null, FolderCategory.UNKNOWN))
         var iters = 0
-        val videoExtensions = listOf(".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m3u8")
-
+        
         while (folderQueue.isNotEmpty() && iters < 500) {
-            val pair = folderQueue.removeAt(0)
-            val currentId = pair.first
-            val currentParent = pair.second
+            val (currentId, currentParent, currentCategory) = folderQueue.removeAt(0)
             try {
                 val response = streamtapeApi.listFolder(streamtapeLogin, streamtapeKey, currentId)
                 response.result?.let { res ->
                     res.files?.forEach { file ->
-                        val fileName = file.name.lowercase()
-                        if (videoExtensions.any { fileName.endsWith(it) }) {
-                            val name = if (currentParent != null && file.name.length < 10) "$currentParent ${file.name}" else file.name
-                            results.add(name to ServerLink("Streamtape", file.linkid, "HD"))
+                        var name = if (currentParent != null && file.name.length < 10) "$currentParent ${file.name}" else file.name
+                        if (currentCategory == FolderCategory.ANIME && !name.contains("[Anime]", ignoreCase = true)) {
+                            name = "[Anime] $name"
                         }
+                        results.add(Triple(name, ServerLink("Streamtape", file.linkid, "HD"), currentCategory))
                     }
                     res.folders?.forEach { folder ->
                         val folderName = folder.name.lowercase()
                         if (!folderName.contains("thumbnail") && !folderName.startsWith(".")) {
-                            folderQueue.add(folder.id to folder.name)
+                            val category = when {
+                                folderName.contains("anime") -> FolderCategory.ANIME
+                                folderName.contains("pelicula") || folderName.contains("movie") -> FolderCategory.MOVIES
+                                folderName.contains("serie") || folderName.contains("tv") -> FolderCategory.SERIES
+                                else -> currentCategory
+                            }
+                            folderQueue.add(Triple(folder.id, folder.name, category))
                         }
                     }
                 }
                 delay(100)
-            } catch (_: Exception) { }
+            } catch (e: Exception) {
+                if (e is java.net.UnknownHostException || e is java.net.ConnectException) throw e
+            }
             iters++
         }
         return results
@@ -428,7 +542,6 @@ class MovieRepositoryImpl @Inject constructor(
     override suspend fun getDownloadUrl(serverName: String, fileId: String): String? = withContext(Dispatchers.IO) {
         try {
             if (serverName.contains("Streamtape", true)) {
-                // Registro de vista silencioso para Streamtape para que no borren el video
                 try {
                     val embedUrl = "https://streamtape.com/e/$fileId"
                     val connection = URL(embedUrl).openConnection() as HttpURLConnection
@@ -436,7 +549,7 @@ class MovieRepositoryImpl @Inject constructor(
                     connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36")
                     connection.connectTimeout = 5000
                     connection.readTimeout = 5000
-                    connection.responseCode // Disparar petición para contar la vista
+                    connection.responseCode 
                     connection.disconnect()
                 } catch (e: Exception) {
                     Log.e("StreamtapeHit", "Error al registrar vista: ${e.message}")
@@ -552,7 +665,6 @@ class MovieRepositoryImpl @Inject constructor(
             val userRef = firestore.collection("users").document(user.uid)
             userRef.update("watching.$movieId.timestamp", timestamp).await()
             
-            // Incrementar contador de visualizaciones global en Firebase para tendencias
             firestore.collection("trends").document(movieId.toString())
                 .set(mapOf("views" to FieldValue.increment(1)), com.google.firebase.firestore.SetOptions.merge())
         }
@@ -632,14 +744,11 @@ class MovieRepositoryImpl @Inject constructor(
     }
 
     override suspend fun register(username: String, email: String, password: String) {
-        // Ejecución rápida: Solo esperamos a Auth. El resto en segundo plano para no bloquear el flujo de la UI.
         val result = firebaseAuth.createUserWithEmailAndPassword(email, password).await()
         val firebaseUser = result.user ?: throw Exception("Error al crear usuario")
         
-        // Emitimos el usuario inmediatamente para que la UI reaccione
         _currentUser.value = User(username, email, null, true)
         
-        // Actualizaciones secundarias en background (Firestore y Perfil)
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val profileUpdates = UserProfileChangeRequest.Builder()
@@ -704,6 +813,7 @@ class MovieRepositoryImpl @Inject constructor(
     private fun MovieEntity.toDomain() = Movie(
         id = id,
         title = title,
+        originalTitle = originalTitle,
         overview = overview,
         posterUrl = posterUrl,
         backdropUrl = backdropUrl,

@@ -29,6 +29,7 @@ sealed class PlayerUiState {
         val currentLink: ServerLink? = null,
         val nextLink: ServerLink? = null,
         val previousLink: ServerLink? = null,
+        val availableLanguages: List<ServerLink> = emptyList(),
         val videoUrl: String,
         val adUrl: String? = null,
         val headers: Map<String, String> = emptyMap(),
@@ -78,6 +79,11 @@ class PlayerViewModel @Inject constructor(
         loadFromSavedState()
     }
 
+    fun switchServer(link: ServerLink) {
+        val movie = (uiState.value as? PlayerUiState.Success)?.movie ?: return
+        loadVideo(link.serverName, link.fileId, movie.id)
+    }
+
     fun loadVideo(
         serverName: String, 
         fileId: String, 
@@ -125,12 +131,22 @@ class PlayerViewModel @Inject constructor(
                     val currentLink = movie.serverLinks.find { it.fileId == fileId }
                     val nextLink = findNextEpisode(movie, currentLink)
                     val previousLink = findPreviousEpisode(movie, currentLink)
+                    
+                    // Filter links for the same episode/movie but different languages
+                    val languages = movie.serverLinks.filter { link ->
+                        if (currentLink?.season != null && currentLink.episode != null) {
+                            link.season == currentLink.season && link.episode == currentLink.episode
+                        } else {
+                            true // For movies, all links are relevant
+                        }
+                    }
 
                     _uiState.value = PlayerUiState.Success(
                         movie = movie,
                         currentLink = currentLink,
                         nextLink = nextLink,
                         previousLink = previousLink,
+                        availableLanguages = languages,
                         videoUrl = videoUrlResult,
                         adUrl = preloadedAdUrl ?: adsManager.getPlayerAdUrl(),
                         headers = extractionResult.headers,
